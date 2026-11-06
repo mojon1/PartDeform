@@ -23,13 +23,13 @@ from .i18n import tr
 # ---------------------------------------------------------------------------
 # プラグインID（Maxon で登録した正式なID。* は取得待ちでテスト用の番号のまま）
 # ---------------------------------------------------------------------------
-ID_PANEL = 1073413  # 本体（パネルを開くコマンド）
-ID_CMD_BEND = 1000002  # *
-ID_CMD_SHEAR = 1000003  # *
-ID_CMD_TAPER = 1000004  # *
-ID_CMD_TWIST = 1000005  # *
-ID_CMD_BULGE = 1000006  # *
-ID_CMD_BEVEL = 1000007  # *
+ID_PANEL = 1073413  # PartDeform（本体。パネルを開くコマンド）
+ID_CMD_BEND = 1073415  # PartDeformBend
+ID_CMD_SHEAR = 1073416  # PartDeformShear
+ID_CMD_TAPER = 1073417  # PartDeformTaper
+ID_CMD_TWIST = 1073418  # PartDeformTwist
+ID_CMD_BULGE = 1073419  # PartDeformBulge
+ID_CMD_BEVEL = 1073420  # PartDeformBevel
 ID_TOOL_PICK = 1000009  # * 起点クリックのツール（メニューには出さない）
 # 印を入れる BaseContainer のキー。登録済みのIDなら他のプラグインと重ならないので、本体のIDを使う
 ID_MARKER = ID_PANEL
