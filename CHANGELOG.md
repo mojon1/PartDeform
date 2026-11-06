@@ -28,13 +28,11 @@
 - **Freeze tells you about child objects.** Freeze bakes only the mesh itself, so child objects that were deformed together
   go back to their original shape. The message now says so.
   フリーズで焼き込むのはメッシュそのものだけなので、一緒に変形していた子オブジェクトは元の形に戻る。そのことをメッセージで知らせるようにした。
-- **Fix: the deformer could be placed a few degrees off.** On a surface where details are placed unevenly
-  (for example, raised blocks scattered over a plane), the automatic direction drifted a few degrees away from the edges.
-  The tip then did not move by the set amount along its whole width (in one scene, only 78–100% of it depending on the spot),
-  and the anchor edge moved slightly. The deformer now lines up exactly with the edge flow.
-  **修正: デフォーマーが数度傾いて置かれることがあった。** 凸などが偏って並ぶ面（平面に押し出しが不規則に散らばっている等）では、
-  自動の向きがエッジから数度ずれていた。そのため先端の辺が場所によって指定した量だけずれず（ある例では指定値の 78〜100%）、
-  起点の辺もわずかに動いていた。デフォーマーがエッジの流れにきちんと揃うようにした。
+- **More accurate fitting.** Even on surfaces with unevenly placed details (for example, raised blocks scattered over a plane),
+  the deformer now lines up exactly with the edge flow. The tip moves by exactly the set amount along its whole width,
+  and the anchor edge stays in place.
+  **フィットの精度を上げた。** 凸などが偏って並ぶ面（平面に押し出しが不規則に散らばっている等）でも、デフォーマーが
+  エッジの流れにきちんと揃うようにした。先端の辺は全体にわたって指定した量だけずれ、起点の辺はその場にとどまる。
 
 ## 1.0.0 (2026-11-06)
 
