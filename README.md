@@ -6,7 +6,7 @@
 
 ![PartDeform: a bent pipe and a twisted column, with the PartDeform panel](docs/images/overview_en.png)
 
-**[⬇ Download PartDeform 1.0.0 (zip)](https://github.com/mojon1/PartDeform/releases/download/v1.0.0/PartDeform-v1.0.0-plugin.zip)** — free. Unzip it and put the `PartDeform` folder into your Cinema 4D `plugins` folder ([Installation](#installation)).
+**[⬇ Download PartDeform 1.0.0 (zip)](https://github.com/mojon1/PartDeform/releases/download/v1.0.0/PartDeform-v1.0.0-plugin.zip)** — free. Also on [Gumroad](https://mojon.gumroad.com/l/partdeform) (pay what you want). Unzip it and put the `PartDeform` folder into your Cinema 4D `plugins` folder ([Installation](#installation)).
 
 <a href="https://youtu.be/VMyHsNeK2TE"><img src="docs/images/demo_thumbnail.jpg" width="560" alt="Watch PartDeform in use on YouTube"></a>
 

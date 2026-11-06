@@ -6,7 +6,7 @@
 
 ![PartDeform: 屈曲した円柱とツイストした角柱、PartDeform のパネル](docs/images/overview_ja.png)
 
-**[⬇ PartDeform 1.0.0 をダウンロード（zip）](https://github.com/mojon1/PartDeform/releases/download/v1.0.0/PartDeform-v1.0.0-plugin.zip)** — 無料。展開して、`PartDeform` フォルダを C4D の `plugins` フォルダに入れてください（[インストール](#インストール)）。
+**[⬇ PartDeform 1.0.0 をダウンロード（zip）](https://github.com/mojon1/PartDeform/releases/download/v1.0.0/PartDeform-v1.0.0-plugin.zip)** — 無料。[Gumroad](https://mojon.gumroad.com/l/partdeform) でも配布しています（お好きな金額で応援できます）。展開して、`PartDeform` フォルダを C4D の `plugins` フォルダに入れてください（[インストール](#インストール)）。
 
 <a href="https://youtu.be/VMyHsNeK2TE"><img src="docs/images/demo_thumbnail.jpg" width="560" alt="PartDeform を使っている様子（YouTube）"></a>
 
