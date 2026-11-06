@@ -833,8 +833,8 @@ def _subsample(seq, n):
     return [seq[int(i * step)] for i in range(n)]
 
 
-def _snap_direction(d, candidates, max_angle_deg):
-    """d に近い候補軸（±）があれば、その軸に揃える。"""
+def _nearest_axis(d, candidates, max_angle_deg):
+    """候補軸（±）のうち、d から max_angle_deg 以内でいちばん近いもの（d と同じ向き）。無ければ None。"""
     limit = math.cos(math.radians(max_angle_deg))
     best = None
     for c in candidates:
@@ -842,7 +842,13 @@ def _snap_direction(d, candidates, max_angle_deg):
         dot = d.Dot(c)
         if abs(dot) >= limit and (best is None or abs(dot) > best[0]):
             best = (abs(dot), c if dot > 0 else -c)
-    return best[1] if best else d
+    return best[1] if best else None
+
+
+def _snap_direction(d, candidates, max_angle_deg):
+    """d に近い候補軸（±）があれば、その軸に揃える。"""
+    axis = _nearest_axis(d, candidates, max_angle_deg)
+    return axis if axis is not None else d
 
 
 def boundary_direction(info):
@@ -874,23 +880,31 @@ def boundary_direction(info):
 def auto_frame(info):
     """自動の向き (X, Y, Z)。起点（-Y 側）は未選択部分とつながっている側にする。
 
-    1) 境目→境目から遠い部分の方向が出れば、それを主軸にする（オブジェクトの軸や
-       選択範囲の形の主軸に近ければ揃える）。
+    1) 境目→境目から遠い部分の方向が出れば、それを主軸にする。面の上でエッジの流れに
+       近ければその向きで確定。そうでなければ、オブジェクトの軸→選択範囲の形の主軸の順に、
+       近いものへ揃える。
     2) 出なければ、形から主軸を決め、起点は境目の偏り→オブジェクトの中心の順で決める。
     """
     y = boundary_direction(info)
     if y is None:
         return orient_root(info, auto_axes(info))
-    cov, _ = _covariance(info.points)
-    _vals, pca = _eig_sym3(cov)
     surface = info.area > EPS and info.coherence >= COHERENCE_SURFACE
+    y_edge = None
     if surface:
         # 面の上では、まずエッジの流れの向きに揃える（斜めの面でもエッジに沿った箱にする）
         aligned = _edge_aligned_axes(info, info.normal_sum.GetNormalized())
         if aligned is not None:
-            y = _snap_direction(y, aligned, SNAP_ANGLE)
-    y = _snap_direction(y, (c4d.Vector(1, 0, 0), c4d.Vector(0, 1, 0), c4d.Vector(0, 0, 1)), SNAP_ANGLE)
-    y = _snap_direction(y, pca, SNAP_ANGLE)
+            y_edge = _nearest_axis(y, aligned, SNAP_ANGLE)
+    if y_edge is not None:
+        # エッジの向きはトポロジーから決まる正確な向きなので、これで確定する。
+        # このあと形の主成分分析に揃えると、凸が偏って並ぶ面などでは点の分布につられて
+        # 箱が数度傾き、先端のずれが辺の場所によって変わってしまう（1.0.0 の不具合）。
+        y = y_edge
+    else:
+        cov, _ = _covariance(info.points)
+        _vals, pca = _eig_sym3(cov)
+        y = _snap_direction(y, (c4d.Vector(1, 0, 0), c4d.Vector(0, 1, 0), c4d.Vector(0, 0, 1)), SNAP_ANGLE)
+        y = _snap_direction(y, pca, SNAP_ANGLE)
     # 曲げ方向 X: 面なら法線の側（面が反り返る向き）、それ以外は主軸に直交する断面の薄い方向
     if surface:
         n = info.normal_sum.GetNormalized()

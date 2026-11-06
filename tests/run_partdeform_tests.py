@@ -260,6 +260,50 @@ def test_tilted_square_patch(doc):
     check("TiltedSquare: 箱の大きさが選択範囲ぴったり（200×200）", abs(size.y - 200) < 0.01 and abs(size.z - 200) < 0.01, str(size))
 
 
+def test_bumpy_patch_shear(doc):
+    """凸が偏って並ぶ平面の一部にシアー: 箱の向きは平面のエッジに揃い、先端の辺全体が指定どおりずれる。
+
+    1.0.0 では、エッジに揃えた向きを点の主成分分析が上書きし、箱が数度傾いていた
+    （先端の辺のずれが場所によって 78〜100% になり、起点の辺も少し動いた）。ユーザーのシーンの再現。
+    """
+    print("--- BumpyPatch ---")
+    plane = c4d.BaseObject(c4d.Oplane)
+    plane[c4d.PRIM_PLANE_WIDTH] = plane[c4d.PRIM_PLANE_HEIGHT] = 400
+    plane[c4d.PRIM_PLANE_SUBW] = plane[c4d.PRIM_PLANE_SUBH] = 10
+    plane.SetName("BumpyPatch")
+    plane = make_editable(doc, plane)
+    plane.SetRelPos(c4d.Vector(0, -600, 0))
+    # 升目（40×40）を、斜めに偏った並びで1つずつ押し出す。どれも辺も角も接していない
+    bumps = ((180, 180), (100, 140), (180, 60), (20, -100), (100, -180), (-100, 20))
+    select_polys(plane, lambda c: any(abs(c.x - bx) < 1 and abs(c.z - bz) < 1 for bx, bz in bumps))
+    bc = c4d.BaseContainer()
+    bc[c4d.MDATA_EXTRUDE_OFFSET] = 17.0
+    bc[c4d.MDATA_EXTRUDE_PRESERVEGROUPS] = False
+    c4d.utils.SendModelingCommand(c4d.ID_MODELING_EXTRUDE_TOOL, [plane], c4d.MODELINGCOMMANDMODE_POLYGONSELECTION, bc, doc)
+    plane.Message(c4d.MSG_UPDATE)
+    # x = -40 より先（升目6列ぶん）を選ぶ。起点は未選択とつながる x = -40 の辺、先端は x = 200 の辺
+    doc.SetActiveObject(plane, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Mpolygons)
+    select_polys(plane, lambda c: c.x > -40 + 1e-3)
+    before = plane.GetAllPoints()
+
+    d, how = core.create_or_switch(doc, c4d.Oshear)
+    m = d.GetMl()
+    x, y = m.v1.GetNormalized(), m.v2.GetNormalized()
+    check("BumpyPatch: 主軸 Y が平面のエッジ（ワールド X）に揃う", abs(abs(y.x) - 1.0) < 1e-6, str(y))
+    check("BumpyPatch: ずれの向き X が平面の法線（Y）に揃う", abs(abs(x.y) - 1.0) < 1e-6, str(x))
+    size = d[c4d.DEFORMOBJECT_SIZE]
+    check("BumpyPatch: 箱の長さが選択範囲ぴったり（240×400）", abs(size.y - 240) < 1e-3 and abs(size.z - 400) < 1e-3, str(size))
+
+    core.set_shear_shift(doc, d, 50.0)
+    pts = deformed_points(doc, plane)
+    tip = [(pts[i] - p).GetLength() for i, p in enumerate(before) if abs(p.x - 200) < 1e-3 and abs(p.y) < 1e-3]
+    root = [(pts[i] - p).GetLength() for i, p in enumerate(before) if abs(p.x + 40) < 1e-3 and abs(p.y) < 1e-3]
+    check("BumpyPatch: 先端の辺がどこでも 50 ずれる", tip and all(abs(t - 50.0) < 1e-3 for t in tip),
+          "%.3f〜%.3f" % (min(tip), max(tip)) if tip else "")
+    check("BumpyPatch: 起点の辺は動かない", root and max(root) < 1e-3, "%.4f" % max(root) if root else "")
+
+
 def test_recapture(doc):
     """選択を取り直す: 同じ種類ならタグを書き換えて箱を合わせ直す。種類が変われば付け替えて古いタグを消す。アンドゥ1回。"""
     print("--- Recapture ---")
@@ -832,9 +876,13 @@ def main(keep_document=False):
     c4d.documents.InsertBaseDocument(doc)
     c4d.documents.SetActiveDocument(doc)
     doc = c4d.documents.GetActiveDocument()
+    # パネルの「選択範囲に限定」はユーザーの設定として残るので、テストは既定（オン）で流し、最後に戻す
+    saved_limit = ui.limit_default()
+    ui.set_limit_default(True)
     try:
         _run_all(doc)
     finally:
+        ui.set_limit_default(saved_limit)
         if not keep_document:
             # テスト用ドキュメントを閉じ、元のドキュメントに戻す
             c4d.StopAllThreads()
@@ -862,6 +910,7 @@ def _run_all(doc):
                 c4d.Vector(0, 0, -50.0 * math.cos(math.radians(22.5))))
     test_face_shear(doc)
     test_tilted_square_patch(doc)
+    test_bumpy_patch_shear(doc)
     test_recapture(doc)
     test_add_stacked(doc)
     test_selection_limit(doc)

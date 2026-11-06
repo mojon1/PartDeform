@@ -6,6 +6,13 @@
   (for example, bend the middle of a pipe and let the rest follow). The Fields layer stays but is disabled, so you can switch back at any time.
   パネルに「選択範囲に限定」を追加。オフにすると標準のデフォーマーと同じ動きになる（パイプの途中を曲げて、先の部分も付いてこさせるなど）。
   フィールドのレイヤーは「有効」オフで残るので、いつでも戻せる。
+- **Fix: the box could come out tilted by a few degrees.** On a surface where details are placed unevenly
+  (for example, raised blocks scattered over a plane), the automatic direction drifted a few degrees away from the edges.
+  The tip then did not move by the set amount along its whole width (in one scene, only 78–100% of it depending on the spot),
+  and the anchor edge moved slightly. The box now lines up exactly with the edge flow.
+  **修正: 箱が数度傾くことがあった。** 凸などが偏って並ぶ面（平面に押し出しが不規則に散らばっている等）では、
+  自動の向きがエッジから数度ずれていた。そのため先端の辺が場所によって指定した量だけずれず（ある例では指定値の 78〜100%）、
+  起点の辺もわずかに動いていた。箱がエッジの流れにきちんと揃うようにした。
 
 ## 1.0.0 (2026-11-06)
 
