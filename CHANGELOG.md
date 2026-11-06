@@ -16,3 +16,5 @@ First public release. / 最初の公開版。
   種類の切り替え、Shift＋クリックで重ねる、選択を取り直す、フリーズ（アンドゥ1回）。
 - English / Japanese UI.
   英語・日本語表示。
+- The version is shown in the panel title and in VERSION.txt.
+  パネルのタイトルと VERSION.txt でバージョンが分かる。

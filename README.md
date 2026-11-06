@@ -19,13 +19,17 @@ Keep the result as a deformer + selection tag, or **Freeze** it into the mesh.
 
 ## Installation
 
-1. Download `PartDeform-1.0.0.zip` from [Releases](https://github.com/mojon1/PartDeform/releases/latest) and unzip it.
+1. Download `PartDeform-v1.0.0-plugin.zip` from [Releases](https://github.com/mojon1/PartDeform/releases/latest) and unzip it
+   (not "Source code", which GitHub adds automatically).
 2. Put the `PartDeform` folder (the one that contains `PartDeform.pyp`, `partdeform` and `res`) into your Cinema 4D `plugins` folder.
    The `plugins` folder is inside the preferences folder, which you can open with the button at the bottom left of the Preferences window
    (**Edit > Preferences**; on macOS it may be under the **Cinema 4D** menu). Create the `plugins` folder if it does not exist.
    You can also keep the folder anywhere and add its location to the plugin search paths in **Preferences > Plugins**.
 3. Restart Cinema 4D.
 4. Open the panel from **Extensions > PartDeform**. Docking it into your layout is handy.
+
+To update, replace the `PartDeform` folder with the new one (keep the folder name; do not keep two versions side by side).
+The version is shown in the panel title and in `VERSION.txt`.
 
 The menu contains "PartDeform" (the panel) and six commands, "Bend to Selection" to "Bevel to Selection".
 You can assign the commands to shortcuts or palettes in the Command Manager.
@@ -98,6 +102,7 @@ Bevel works differently from the other five (it cuts corners and adds faces, so 
 ## Development
 
 - `tests/run_partdeform_tests.py`: integration tests. Open and run it in the Script Manager. It works in a new document and does not touch your scenes (save your work before running it). Results are printed to the console.
+- `tools/build_release.py`: builds the release zip from the committed files (`dist/PartDeform-v<version>-plugin.zip`). The version comes from `__version__` in `partdeform/__init__.py`.
 - Set the environment variable `PARTDEFORM_LANG` to `ja` or `en` to force the UI language.
 
 ```
@@ -110,6 +115,7 @@ PartDeform/
   partdeform/winowner.py  keeps the floating panel above the main window on Windows
   res/                    minimal resources needed to register the tool
   tests/                  integration tests and a test scene
+  tools/build_release.py  builds the release zip
 ```
 
 ## License

@@ -5,12 +5,16 @@ import math
 import c4d
 from c4d import gui, plugins
 
+from . import __version__
 from . import core
 from . import icons
 from . import winowner
 from .i18n import tr
 
 TITLE = "PartDeform"
+# パネルの題名（窓・ドッキングしたタブに出る）にはバージョンを入れる。
+# winowner は題名で窓を探すので、パネルの窓に関わるところでは必ずこちらを使う
+PANEL_TITLE = "%s %s" % (TITLE, __version__)
 LOG_PREFIX = "[%s] " % TITLE
 
 # パネルのガジェットID
@@ -337,7 +341,7 @@ def leave_pick_mode(doc):
 # ---------------------------------------------------------------------------
 class PartDeformPanel(gui.GeDialog):
     def CreateLayout(self):
-        self.SetTitle(TITLE)
+        self.SetTitle(PANEL_TITLE)
         self.GroupBegin(1000, c4d.BFH_SCALEFIT | c4d.BFV_TOP, cols=1)
         self.GroupBorderSpace(6, 6, 6, 6)
         self.GroupSpace(4, 4)
@@ -425,7 +429,7 @@ class PartDeformPanel(gui.GeDialog):
         self._set_row_gadget(G_DIR, 0.0, core.DIRECTION_SLIDER, core.UNIT_ANGLE)
         self.update_target()
         # フローティング時にメインウィンドウの裏へ隠れないよう、窓の所有者を見張る（ドッキング・切り離しにも追従）
-        winowner.keep_above_main(TITLE)
+        winowner.keep_above_main(PANEL_TITLE)
         self._tick = 0
         self._badges_on = False
         self.SetTimer(100)  # Shift の目印を素早く出すため 0.1 秒ごと
@@ -434,7 +438,7 @@ class PartDeformPanel(gui.GeDialog):
     def Timer(self, msg):
         self._tick = getattr(self, "_tick", 0) + 1
         if self._tick % 5 == 0:
-            winowner.keep_above_main(TITLE)
+            winowner.keep_above_main(PANEL_TITLE)
         want = shift_down() and self._is_active()
         if want != getattr(self, "_badges_on", False):
             self._set_badges(want)
@@ -465,7 +469,7 @@ class PartDeformPanel(gui.GeDialog):
 
     def _is_active(self):
         """パネルがアクティブか: 浮いたパネルが前面の窓、またはマウスがパネルの上。"""
-        return winowner.is_foreground(TITLE) or self._mouse_inside()
+        return winowner.is_foreground(PANEL_TITLE) or self._mouse_inside()
 
     def _set_badges(self, on):
         """種類ボタンのアイコンを、通常／右下に緑の＋（Shift＋クリックで追加）に切り替える。"""

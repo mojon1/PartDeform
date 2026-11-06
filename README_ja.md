@@ -19,13 +19,17 @@
 
 ## インストール
 
-1. [Releases](https://github.com/mojon1/PartDeform/releases/latest) から `PartDeform-1.0.0.zip` をダウンロードして展開します。
+1. [Releases](https://github.com/mojon1/PartDeform/releases/latest) から `PartDeform-v1.0.0-plugin.zip` をダウンロードして展開します
+   （GitHub が自動で付ける「Source code」ではありません）。
 2. `PartDeform` フォルダ（`PartDeform.pyp`・`partdeform`・`res` が入っているフォルダ）を丸ごと、C4D のプラグインフォルダに置きます。
    プラグインフォルダは、設定ウィンドウ（**編集 ＞ 設定**。macOS では **Cinema 4D** メニューにある場合があります）の左下のボタンで開ける設定フォルダの中の `plugins` です。
    `plugins` フォルダが無ければ作ってください。
    好きな場所に置いて、**設定 ＞ プラグイン** の検索パスにそのフォルダを足しても使えます。
 3. C4D を再起動します。
 4. **機能拡張 ＞ PartDeform** からパネルを開きます。レイアウトにドッキングしておくと便利です。
+
+更新するときは、`PartDeform` フォルダを新しいものに置き換えてください（フォルダ名はそのまま。古い版と並べて置かないでください）。
+バージョンは、パネルのタイトルと `VERSION.txt` で確かめられます。
 
 メニューには「PartDeform」（パネル）と「選択範囲に屈曲」〜「選択範囲にベベル」の6個が入ります。
 種類ごとのコマンドは、コマンドマネージャーでショートカットやパレットにも割り当てられます。
@@ -98,6 +102,7 @@
 ## 開発
 
 - `tests/run_partdeform_tests.py` … 通しテスト。C4D のスクリプトマネージャーで開いて実行します。新しいドキュメントを作って確かめるので、作業中のシーンには触りません（実行前に作業中のシーンを保存してください）。結果はコンソールに出ます。
+- `tools/build_release.py` … コミット済みの内容から配布用 zip（`dist/PartDeform-v<版>-plugin.zip`）を作ります。版は `partdeform/__init__.py` の `__version__` から読みます。
 - 表示言語は、環境変数 `PARTDEFORM_LANG` に `ja` か `en` を入れると、C4D の表示言語に関係なく固定できます。
 
 ```
@@ -110,6 +115,7 @@ PartDeform/
   partdeform/winowner.py  … Windows でパネルがメインウィンドウの裏に隠れないようにする
   res/                    … ツールの登録に必要な最小限のリソース
   tests/                  … 通しテストと確認用シーン
+  tools/build_release.py  … 配布用 zip を作る
 ```
 
 ## ライセンス
