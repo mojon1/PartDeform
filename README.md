@@ -15,7 +15,7 @@ Keep the result as a deformer + selection tag, or **Freeze** it into the mesh.
 
 ## Requirements
 
-- Cinema 4D 2027 (tested on Windows; macOS testing in progress)
+- Cinema 4D 2027 (tested on Windows and macOS). Earlier versions are untested; R20 or later is required at minimum (Fields) and R23 or later for Python 3.
 
 ## Installation
 
