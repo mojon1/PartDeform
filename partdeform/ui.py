@@ -30,6 +30,8 @@ G_SHIFT_LABEL = 1400  # 1段目（量）の名前
 G_SHIFT = 1401  # 1段目（量）: シアー・テーパー・膨張・ベベルは長さ、屈曲・ツイストは角度
 G_DIR_LABEL = 1402  # 2段目（方向）の名前
 G_DIR = 1403  # 2段目（方向）: 屈曲・シアーの角度（曲げ・ずらす向き）
+G_FEATHER_LABEL = 1404  # 3段目（ぼかし）の名前
+G_FEATHER = 1405  # 3段目（ぼかし）: 境目から内側へ効きを弱める幅（長さ）
 G_DEFORMEDIT = 1500
 G_LIMIT = 1501  # 「選択範囲に限定」のチェック
 G_RECAPTURE = 1307
@@ -289,13 +291,17 @@ def do_limit(doc, on):
     return _run(doc, None, work)
 
 
-# パネルの数値欄（2段）。選んでいるデフォーマーの種類で、名前と単位（長さ／角度）が切り替わる
+# パネルの数値欄（3段）。選んでいるデフォーマーの種類で、名前と単位（長さ／角度）が切り替わる
 AMOUNT_LABEL_NONE = tr("量（PartDeform のデフォーマーを選ぶと使えます）", "Amount (select a PartDeform deformer)")
 DIRECTION_LABEL_NONE = tr("角度（屈曲・シアーで使えます）", "Angle (Bend / Shear)")
-ROW_LABEL_ID = {G_SHIFT: G_SHIFT_LABEL, G_DIR: G_DIR_LABEL}
-ROW_LABEL_NONE = {G_SHIFT: AMOUNT_LABEL_NONE, G_DIR: DIRECTION_LABEL_NONE}
-ROW_CONTENT = {G_SHIFT: core.amount_row, G_DIR: core.direction_row}
-ROW_PARAMS = {G_SHIFT: core.amount_params, G_DIR: core.direction_params}
+FEATHER_LABEL_NONE = tr("ぼかし（選択範囲にかけた箱の種類で使えます）", "Feather (box types on a selection)")
+ROW_IDS = (G_SHIFT, G_DIR, G_FEATHER)
+ROW_LABEL_ID = {G_SHIFT: G_SHIFT_LABEL, G_DIR: G_DIR_LABEL, G_FEATHER: G_FEATHER_LABEL}
+ROW_LABEL_NONE = {G_SHIFT: AMOUNT_LABEL_NONE, G_DIR: DIRECTION_LABEL_NONE, G_FEATHER: FEATHER_LABEL_NONE}
+ROW_CONTENT = {G_SHIFT: core.amount_row, G_DIR: core.direction_row, G_FEATHER: core.feather_row}
+# ドラッグ前の値に戻すパラメーター（ぼかしはパラメーターではなく頂点マップなので、幅で戻す＝_finish_drag）
+ROW_PARAMS = {G_SHIFT: core.amount_params, G_DIR: core.direction_params, G_FEATHER: lambda d: ()}
+ROW_NONE_RANGE = {G_SHIFT: (-1.0, 1.0), G_DIR: core.DIRECTION_SLIDER, G_FEATHER: (0.0, 1.0)}
 
 
 def _row_target(doc, gid):
@@ -380,7 +386,29 @@ def do_direction(doc, value):
     return _run(doc, None, work)
 
 
-ROW_APPLY = {G_SHIFT: do_amount, G_DIR: do_direction}
+def do_feather(doc, value):
+    """3段目（ぼかし）の確定。境目から内側へ効きを弱める幅。0 でぼかしを外す。アンドゥ1回。"""
+    def work():
+        d, row = _row_target(doc, G_FEATHER)
+        if d is None:
+            raise core.SDError(tr("選択範囲にかけた PartDeform の箱の種類（屈曲・シアー・テーパー・ツイスト・膨張）を選択してください。",
+                                  "Select a PartDeform Bend, Shear, Taper, Twist or Bulge that works on a selection."))
+        core.set_feather(doc, d, value)
+        width = core.feather_width(d)
+        if width <= 0.0:
+            report(tr("%s のぼかしを外しました（境目はくっきり）。", "Removed the feather from %s (sharp border).") % d.GetName())
+            return d
+        message = tr("%s のぼかしを %s にしました（境目から内側へ弱めます）。", "Set the feather of %s to %s (fades inward from the border).") % (d.GetName(), format_length(width))
+        if core.selection_limit(d) is False:
+            report(message + tr("「選択範囲に限定」がオフなので、オンにすると効きます。", " Limit to Selection is off; turn it on for the feather to take effect."), error=True)
+        else:
+            report(message)
+        return d
+
+    return _run(doc, None, work)
+
+
+ROW_APPLY = {G_SHIFT: do_amount, G_DIR: do_direction, G_FEATHER: do_feather}
 
 
 def show_in_attribute_manager(obj):
@@ -467,6 +495,9 @@ class PartDeformPanel(gui.GeDialog):
         # 2段目＝方向: 屈曲・シアーの角度（曲げる向き・ずらす向き）
         self.AddStaticText(G_DIR_LABEL, c4d.BFH_SCALEFIT, name=DIRECTION_LABEL_NONE)
         self.AddEditSlider(G_DIR, c4d.BFH_SCALEFIT)
+        # 3段目＝ぼかし: 選んだ範囲の内側で、境目に向かって効きを 0 まで弱める幅（0 でくっきり）
+        self.AddStaticText(G_FEATHER_LABEL, c4d.BFH_SCALEFIT, name=FEATHER_LABEL_NONE)
+        self.AddEditSlider(G_FEATHER, c4d.BFH_SCALEFIT)
 
         self.AddSeparatorH(0, c4d.BFH_SCALEFIT)
         self.AddStaticText(0, c4d.BFH_LEFT, name=tr("起点と方向", "Anchor & Direction"))
@@ -483,7 +514,7 @@ class PartDeformPanel(gui.GeDialog):
         self._add_icon_button(G_RECAPTURE, ICON_RECAPTURE, tr("選択を取り直す", "Update Selection"),
                               tr("メッシュの今の選択（今のモード）で選択範囲タグを取り直し、向きと起点も自動判定し直す", "Replace the selection tag with the mesh's current selection (current mode) and detect the direction and the anchor again"))
         self._add_icon_button(G_FREEZE, ICON_FREEZE, tr("フリーズ", "Freeze"),
-                              tr("変形をポリゴンに書き込み、デフォーマーと PartDeform が作った選択範囲タグを消す（アンドゥ1回で戻る）", "Bake the deformation into the polygons and remove the deformer and the selection tag created by PartDeform (one undo step)"))
+                              tr("変形をポリゴンに書き込み、デフォーマーと PartDeform が作った選択範囲タグ（とぼかしの頂点マップ）を消す（アンドゥ1回で戻る）", "Bake the deformation into the polygons and remove the deformer and the selection tag (and feather vertex map) created by PartDeform (one undo step)"))
         self.GroupEnd()
 
         # ビューの「表示 ＞ デフォーマ後に編集」と同じ設定（アクティブなビュー）。パネルは値を読み書きするだけ
@@ -528,12 +559,14 @@ class PartDeformPanel(gui.GeDialog):
             tr("メッシュ選択中は作成、PartDeform のデフォーマー選択中は切り替え。Shift＋クリックで同じ選択範囲に重ねて追加", "Creates on a selected mesh, switches the type on a selected PartDeform deformer. Shift+click to stack another deformer on the same selection"))
 
     def InitValues(self):
-        # スライダーのドラッグ中: (欄のID, デフォーマー, {パラメーター: ドラッグ前の値}, ドラッグ前のシアーのずれ)
+        # スライダーのドラッグ中: (欄のID, デフォーマー, {パラメーター: ドラッグ前の値}, ドラッグ前のシアーのずれ,
+        #                        ドラッグ前のぼかしの幅)
         self._drag = None
         self._shown = {}  # 欄のID → 今出している (対象, 範囲, 単位, 値)
         self._pick_on = None  # 「起点」ボタンに今出しているオン／オフ
         self._set_row_gadget(G_SHIFT, 0.0, (-1.0, 1.0), core.UNIT_LENGTH)
         self._set_row_gadget(G_DIR, 0.0, core.DIRECTION_SLIDER, core.UNIT_ANGLE)
+        self._set_row_gadget(G_FEATHER, 0.0, (0.0, 1.0), core.UNIT_LENGTH)
         self.update_target()
         # フローティング時にメインウィンドウの裏へ隠れないよう、窓の所有者を見張る（ドッキング・切り離しにも追従）
         winowner.keep_above_main(PANEL_TITLE)
@@ -639,14 +672,14 @@ class PartDeformPanel(gui.GeDialog):
         """数値欄（量・方向）を、選んでいるデフォーマーの種類に合わせて名前と単位を切り替えて表示する。"""
         if getattr(self, "_drag", None) is not None:
             return  # ドラッグ中はスライダーを書き換えない（つまみが飛ぶため）
-        for gid in (G_SHIFT, G_DIR):
+        for gid in ROW_IDS:
             target, row = _row_target(doc, gid)
             if row is not None:
                 label, unit, value, slider_range = row
             else:
                 label, value = ROW_LABEL_NONE[gid], 0.0
                 unit = core.UNIT_ANGLE if gid == G_DIR else core.UNIT_LENGTH
-                slider_range = core.DIRECTION_SLIDER if gid == G_DIR else (-1.0, 1.0)
+                slider_range = ROW_NONE_RANGE[gid]
             self.SetString(ROW_LABEL_ID[gid], label)
             self.Enable(gid, row is not None)
             self.Enable(ROW_LABEL_ID[gid], row is not None)
@@ -672,10 +705,13 @@ class PartDeformPanel(gui.GeDialog):
                 self._finish_drag(doc)  # 別の欄のドラッグが確定されずに残っていたら先に確定する
             originals = {p: target[p] for p in ROW_PARAMS[gid](target)}
             keep_shift = core.shear_shift(target) if target.GetType() == c4d.Oshear else None
-            self._drag = (gid, target, originals, keep_shift)
+            self._drag = (gid, target, originals, keep_shift, core.feather_width(target))
         try:
             if gid == G_SHIFT:
                 core.set_amount(doc, target, value, undo=False)
+            elif gid == G_FEATHER:
+                # 境目からの距離は最初に一度だけ測って使い回すので、ドラッグ中は重みを掛け直すだけ
+                core.set_feather(doc, target, value, undo=False)
             else:
                 # シアーはドラッグ前のずれを保つ（毎回いまのずれから換算すると誤差がたまる）
                 core.set_direction(doc, target, value, undo=False, keep_shift=self._drag[3])
@@ -690,11 +726,16 @@ class PartDeformPanel(gui.GeDialog):
         """ドラッグ中なら、ドラッグ前の値に戻してから最終値をアンドゥ1回分として入れる。
         gid を渡せばその欄の value を確定する（ドラッグでない入力もここを通る）。"""
         if self._drag is not None:
-            drag_gid, target, originals, _ = self._drag
+            drag_gid, target, originals, _, feather0 = self._drag
             self._drag = None
             if target.IsAlive():
                 for param, original in originals.items():
                     target[param] = original
+                if drag_gid == G_FEATHER:
+                    try:
+                        core.set_feather(doc, target, feather0, undo=False)  # ドラッグ前の頂点マップに戻す
+                    except core.SDError:
+                        pass
             if drag_gid != gid:
                 ROW_APPLY[drag_gid](doc, self.GetFloat(drag_gid))
         if gid is not None:
@@ -745,7 +786,7 @@ class PartDeformPanel(gui.GeDialog):
             do_limit(doc, self.GetBool(G_LIMIT))
         elif cid == G_DEFORMEDIT:
             set_deformed_edit(doc, self.GetBool(G_DEFORMEDIT))
-        elif cid in (G_SHIFT, G_DIR):
+        elif cid in ROW_IDS:
             self._on_row(doc, cid, msg)
             if self._drag is not None:
                 return True  # ドラッグ中は表示の更新を省く

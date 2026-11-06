@@ -65,6 +65,7 @@ You can assign the commands to shortcuts or palettes in the Command Manager.
 - With a PartDeform deformer selected, a type button **switches the type** and keeps the box and the direction.
 - **Shift+click** a type button to **stack** a new deformer on the same selection and direction (for example Taper + Twist).
   While you hold Shift over the panel, a green + appears on the icons.
+- If a crease shows at the border of the selection, raise **Feather** in the panel: the effect fades inward from the border over that width.
 - To bend the middle of a pipe and let the rest follow, turn off **Limit to Selection** in the panel.
   Unselected parts then deform like with a standard deformer, and the part beyond the box follows without changing shape.
 ![Anchor mode: green = current anchor, orange = the side you are about to set](docs/images/anchor_en.png)
@@ -94,6 +95,7 @@ The deformer is applied to the whole object when nothing is selected, in Model m
 | Limit to Selection | **On (default)**: only the selected part deforms. **Off**: the Variable Tag layer in the Fields is disabled, so the deformer works like a standard one (unselected parts inside the box deform too, and with Bend the part beyond the box follows the bend). Shows and switches the selected PartDeform deformer (one undo step), and is also the setting for new deformers (kept after you quit Cinema 4D). Not used for Bevel |
 | Value field (1st row) | **Bend: strength (bend angle), Twist: angle** as angles. **Shear: tip offset, Taper: tip inset per side, Bulge: middle bulge per side, Bevel: offset** as real lengths (the strength % is calculated for you). Uses your Cinema 4D unit settings |
 | Value field (2nd row) | **Bend / Shear angle (direction)**. For Shear, the strength is recalculated so the tip offset (length) stays the same |
+| Feather (3rd row) | **Fades the effect inward from the border** of the selection over this width (a length), so no crease appears at the border. 0 = sharp border (default). Uses a Vertex Map tag in the deformer's Fields, one per deformer; it follows Update Selection, type switches and Fit. Needs Limit to Selection on. Not for Bevel or the whole object |
 | Anchor | Anchor mode: click a side of the object in the viewport to make it the anchor. Keep clicking to switch. Green band = current anchor, orange band = the side you would set. Click outside the object, press Anchor again, press another button, or Esc to finish |
 | Flip | Swap the anchor and the tip |
 | Auto | Reset the direction and the anchor to automatic |

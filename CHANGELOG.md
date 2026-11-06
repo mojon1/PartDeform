@@ -17,6 +17,14 @@
   選択範囲タグは作らない。箱は子オブジェクトも含めた今の形に合わせ、向きはオブジェクトの軸にそろえる（いちばん長い軸が主軸、起点はそのマイナス側の端）。
   「選択を取り直す」で、一部と全体を切り替えられる。全体のベベルは、40°以上の角だけ丸める。
   メッシュになっていないオブジェクトでは、「選択を取り直す」「選択範囲に限定」「フリーズ」は C キーで編集可能にすると使える。
+- **Feather.** A new Feather field in the panel fades the effect inward from the border of the selection,
+  so no crease appears where the deformed part meets the rest. Enter the width as a length (0 = sharp border, the default).
+  It puts a Vertex Map tag into the deformer's Fields (standard Cinema 4D), one per deformer, and follows Update Selection,
+  type switches and Fit. Freeze bakes the feathered shape and removes the vertex map. Not available for Bevel or the whole object.
+  **境目のぼかし。** パネルに「ぼかし」を追加。選んだ範囲の内側で、境目に向かって効きを弱めるので、変形した部分とほかの部分の
+  つなぎ目に折れ目が出ない。幅は長さで入れる（0＝くっきり、既定）。デフォーマーのフィールドに頂点マップタグ（標準機能）を入れる形で、
+  デフォーマーごとに持ち、選択の取り直し・種類の切り替え・フィットにも付いてくる。フリーズはぼかしの効いた形で焼き込み、頂点マップも消す。
+  ベベルとオブジェクト全体には無い。
 - **Freeze tells you about child objects.** Freeze bakes only the mesh itself, so child objects that were deformed together
   go back to their original shape. The message now says so.
   フリーズで焼き込むのはメッシュそのものだけなので、一緒に変形していた子オブジェクトは元の形に戻る。そのことをメッセージで知らせるようにした。

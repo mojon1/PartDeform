@@ -20,6 +20,7 @@
 - プラグインが作ったデフォーマー／タグには、BaseContainer の ID_MARKER に印を残す。
   プラグインが無い環境でも、標準のデフォーマーとタグとしてそのまま動く。
 """
+import heapq
 import math
 
 import c4d
@@ -47,8 +48,11 @@ MK_KIND = 1
 MK_TAG = 2
 MK_VERSION = 3
 MK_WHOLE = 4  # True: オブジェクト全体にかける「全体用」（選択範囲タグもフィールドのレイヤーも持たない）
+MK_FEATHER = 5  # 境目のぼかしの幅（長さ）。0 または無しならぼかさない
+MK_FEATHER_TAG = 6  # ぼかしの頂点マップタグ（リンク）
 KIND_DEFORMER = 1
 KIND_TAG = 2
+KIND_FEATHER = 3  # ぼかしの頂点マップタグ
 MARKER_VERSION = 1
 
 # 扱うデフォーマーの種類（パネルとメニューの並び順）
@@ -126,6 +130,7 @@ AMOUNT_UNIT = {
 DIRECTION_ANGLE_TYPES = (c4d.Obend, c4d.Oshear)
 
 SELTAG_BASENAME = "PD_Sel"
+FEATHER_BASENAME = "PD_Feather"  # ぼかしの頂点マップタグの名前
 
 # 自動判定のしきい値
 COHERENCE_SURFACE = 0.5  # 平均法線の揃い具合。これ以上なら「面」として扱う
@@ -178,7 +183,7 @@ def is_marked(node, kind=None):
         return False
     k = sub.GetInt32(MK_KIND)
     if kind is None:
-        return k in (KIND_DEFORMER, KIND_TAG)
+        return k in (KIND_DEFORMER, KIND_TAG, KIND_FEATHER)
     return k == kind
 
 
@@ -191,7 +196,11 @@ def is_sd_deformer(obj):
     )
 
 
-def _set_marker(node, kind, tag=None, whole=False):
+def _set_marker(node, kind, tag=None, whole=False, feather=None):
+    """印を書く。feather=(幅, 頂点マップ) でぼかしを入れる。None なら、node に今あるぼかしの情報を残す
+    （選択の取り直しなどで印を書き直しても、ぼかしが消えないように）。消すときは (0.0, None)。"""
+    if feather is None and kind == KIND_DEFORMER:
+        feather = (feather_width(node), feather_tag(node))
     bc = node.GetDataInstance()
     sub = c4d.BaseContainer()
     sub.SetInt32(MK_KIND, kind)
@@ -200,7 +209,30 @@ def _set_marker(node, kind, tag=None, whole=False):
         sub.SetLink(MK_TAG, tag)
     if whole:
         sub.SetBool(MK_WHOLE, True)
+    if feather is not None and feather[0] > 0.0 and feather[1] is not None:
+        sub.SetFloat(MK_FEATHER, feather[0])
+        sub.SetLink(MK_FEATHER_TAG, feather[1])
     bc.SetContainer(ID_MARKER, sub)
+
+
+def feather_width(deformer):
+    """境目のぼかしの幅（長さ）。ぼかしていなければ 0。"""
+    sub = _marker(deformer)
+    if sub is None or feather_tag(deformer) is None:
+        return 0.0
+    return max(sub.GetFloat(MK_FEATHER), 0.0)
+
+
+def feather_tag(deformer):
+    """ぼかしの頂点マップタグ（親メッシュのもの）。無ければ None。"""
+    sub = _marker(deformer)
+    if sub is None or deformer is None:
+        return None
+    vmap = sub.GetLink(MK_FEATHER_TAG, deformer.GetDocument())
+    parent = deformer.GetUp()
+    if vmap is None or parent is None or vmap.GetType() != c4d.Tvertexmap or vmap.GetObject() != parent:
+        return None
+    return vmap
 
 
 def is_whole(deformer):
@@ -281,7 +313,13 @@ def selection_limit(deformer):
     if tag is None:
         return None
     fl = deformer[c4d.FIELDS]
-    return any(l.GetChannelFlag(c4d.FIELDLAYER_CHANNELFLAG_ENABLE) for l in _weight_layers(fl, tag, doc))
+    return any(l.GetChannelFlag(c4d.FIELDLAYER_CHANNELFLAG_ENABLE) for l in _weight_layers(fl, _weight_source(deformer, tag), doc))
+
+
+def _weight_source(deformer, tag):
+    """フィールドの変数タグレイヤーが指すもの: ぼかしていればその頂点マップ、いなければ選択範囲タグ。"""
+    vmap = feather_tag(deformer)
+    return vmap if vmap is not None else tag
 
 
 def set_selection_limit(doc, deformer, on, undo=True):
@@ -301,8 +339,9 @@ def set_selection_limit(doc, deformer, on, undo=True):
     if tag is None:
         raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % deformer.GetName())
     _stop_threads()
+    src = _weight_source(deformer, tag)
     fl = deformer[c4d.FIELDS]
-    layers = _weight_layers(fl, tag, doc)
+    layers = _weight_layers(fl, src, doc)
     if not layers and not on:
         return deformer  # もともと何も限定していない
     if undo:
@@ -313,9 +352,9 @@ def set_selection_limit(doc, deformer, on, undo=True):
             for l in layers:
                 l.SetChannelFlag(c4d.FIELDLAYER_CHANNELFLAG_ENABLE, bool(on))
         elif fl is None:
-            fl = make_field_list(tag)
+            fl = make_field_list(src)
         else:
-            fl.InsertLayer(_new_weight_layer(tag))
+            fl.InsertLayer(_new_weight_layer(src))
         deformer[c4d.FIELDS] = fl
         deformer.Message(c4d.MSG_UPDATE)
     finally:
@@ -1382,6 +1421,183 @@ def default_amount(dtype, size, angle=0.0):
     return DEFAULT_AMOUNT[dtype]
 
 
+# ---------------------------------------------------------------------------
+# 境目のぼかし
+# ---------------------------------------------------------------------------
+# 選んだ範囲の内側で、境目（選んでいない部分とのつなぎ目）に向かって効きを 0 まで弱める。
+# 重みは頂点マップタグに入れ、フィールドの変数タグレイヤーを選択範囲タグからその頂点マップに向け替える
+# （標準の頂点マップとフィールドなので、プラグインが無くても同じ形になる）。
+# 距離は面に沿って測る（離れた別の部分へは漏れない）。幅は長さで、デフォーマーごとに持つ。
+FEATHER_LABEL = tr("ぼかし（境目から内側へ弱める幅）", "Feather (fades inward from the border)")
+_distance_cache = {}
+
+
+def _border_distances(mesh, tag):
+    """選択範囲タグの点ごとの、境目からの面に沿った距離。(選択の点番号のリスト, {点番号: 距離}) を返す。
+
+    境目＝選択の点のうち、選択外のポリゴンにも属する点（距離 0）。選んだポリゴンの辺と対角線をたどる
+    ダイクストラ法で測る。境目が無い（すべて選んでいる等）点は辞書に入らない（＝十分遠い）。
+    スライダーのドラッグ中に何度も呼ぶので、メッシュとタグが変わるまで使い回す。
+    """
+    key = (id(mesh), id(tag))
+    dirty = (mesh.GetDirty(c4d.DIRTYFLAGS_DATA), tag.GetDirty(c4d.DIRTYFLAGS_DATA))
+    hit = _distance_cache.get(key)
+    if hit is not None and hit[0] is mesh and hit[1] is tag and hit[2] == dirty:
+        return hit[3], hit[4]
+    info = selection_from_tag(mesh, tag)
+    sel = set(info.point_ids)
+    pts = mesh.GetAllPoints()
+    adj = {}
+    border = set()
+    for i, p in enumerate(mesh.GetAllPolygons()):
+        ids = _poly_ids(p)
+        if i not in info.poly_ids:
+            border.update(v for v in ids if v in sel)
+            continue  # 選択外のポリゴンの中はたどらない
+        for a in range(len(ids)):
+            for b in range(a + 1, len(ids)):
+                u, v = ids[a], ids[b]
+                if u in sel and v in sel:
+                    d = (pts[u] - pts[v]).GetLength()
+                    adj.setdefault(u, []).append((v, d))
+                    adj.setdefault(v, []).append((u, d))
+    dist = dict.fromkeys(border, 0.0)
+    heap = [(0.0, v) for v in border]
+    while heap:
+        d, u = heapq.heappop(heap)
+        if d > dist.get(u, float("inf")):
+            continue
+        for v, w in adj.get(u, ()):
+            nd = d + w
+            if nd < dist.get(v, float("inf")):
+                dist[v] = nd
+                heapq.heappush(heap, (nd, v))
+    _distance_cache.clear()
+    _distance_cache[key] = (mesh, tag, dirty, info.point_ids, dist)
+    return info.point_ids, dist
+
+
+def _feather_weights(mesh, tag, width):
+    """頂点マップの重み（点ごと 0〜1）。選択の外は 0、境目で 0、境目から width 以上内側で 1（なめらかな S 字）。"""
+    ids, dist = _border_distances(mesh, tag)
+    weights = [0.0] * mesh.GetPointCount()
+    for i in ids:
+        t = min(dist.get(i, width) / width, 1.0)
+        weights[i] = t * t * (3.0 - 2.0 * t)
+    return weights
+
+
+def _relink_layers(deformer, old, new, doc):
+    """フィールドの変数タグレイヤーのうち old を指すものを new に向け替える（「有効」はそのまま）。向け替えた数を返す。"""
+    fl = deformer[c4d.FIELDS]
+    layers = _weight_layers(fl, old, doc)
+    for layer in layers:
+        layer.SetLinkedObject(new)
+    if layers:
+        deformer[c4d.FIELDS] = fl
+    return len(layers)
+
+
+def _feather_used_elsewhere(mesh, vmap, deformer):
+    return any(d is not deformer and feather_tag(d) == vmap for d in sd_deformers_under(mesh))
+
+
+def _apply_feather(doc, deformer, mesh, tag, width, undo=True):
+    """ぼかしの頂点マップを作る／書き直し、フィールドのレイヤーをそれに向ける。width<=0 なら選択範囲タグに戻して消す。
+
+    アンドゥは呼び出し側の StartUndo の中で（undo=False ならアンドゥを積まない＝スライダーのドラッグ中）。
+    """
+    old = feather_tag(deformer)
+    if width <= 0.0:
+        if undo:
+            doc.AddUndo(c4d.UNDOTYPE_CHANGE, deformer)
+        if old is not None:
+            _relink_layers(deformer, old, tag, doc)
+        _set_marker(deformer, KIND_DEFORMER, tag, feather=(0.0, None))
+        if old is not None and is_marked(old, KIND_FEATHER) and not _feather_used_elsewhere(mesh, old, deformer):
+            if undo:
+                doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, old)
+            old.Remove()
+        deformer.Message(c4d.MSG_UPDATE)
+        return
+    weights = _feather_weights(mesh, tag, width)
+    vmap = old
+    if vmap is None or vmap.GetDataCount() != len(weights) or _feather_used_elsewhere(mesh, vmap, deformer):
+        # 点の数が変わっていたら（モデリングで増減）作り直す
+        vmap = c4d.VariableTag(c4d.Tvertexmap, len(weights))
+        vmap.SetName(_unique_tag_name(mesh, FEATHER_BASENAME))
+        _set_marker(vmap, KIND_FEATHER)
+        mesh.InsertTag(vmap, tag)
+        if undo:
+            doc.AddUndo(c4d.UNDOTYPE_NEWOBJ, vmap)
+    elif undo:
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE, vmap)
+    vmap.SetAllHighlevelData(weights)
+    vmap.Message(c4d.MSG_UPDATE)
+    if undo:
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE, deformer)
+    if vmap is not old:
+        if not _relink_layers(deformer, old if old is not None else tag, vmap, doc):
+            # レイヤーが無い（限定していない）なら、「有効」オフで入れておく（限定をオンにすれば効く）
+            fl = deformer[c4d.FIELDS] or c4d.FieldList()
+            fl.InsertLayer(_new_weight_layer(vmap, enabled=False))
+            deformer[c4d.FIELDS] = fl
+    _set_marker(deformer, KIND_DEFORMER, tag, feather=(width, vmap))
+    if old is not None and vmap is not old and is_marked(old, KIND_FEATHER) and not _feather_used_elsewhere(mesh, old, deformer):
+        if undo:
+            doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, old)
+        old.Remove()
+    deformer.Message(c4d.MSG_UPDATE)
+
+
+def _feather_target(deformer):
+    """ぼかしを使える PartDeform のデフォーマーなら (メッシュ, 選択範囲タグ)。使えなければ SDError。"""
+    if deformer is None or not is_sd_deformer(deformer):
+        raise SDError(tr("PartDeform のデフォーマーを選択してください。", "Select a PartDeform deformer."))
+    if deformer.GetType() not in BOX_TYPES:
+        raise SDError(tr("ベベルには境目のぼかしはありません。", "Bevel has no feather."))
+    if is_whole(deformer):
+        raise SDError(tr("「%s」はオブジェクト全体にかけているので、ぼかす境目がありません。", "\"%s\" works on the whole object, so there is no border to feather.") % deformer.GetName())
+    mesh = _mesh_of(deformer)
+    tag = get_selection_tag(deformer)
+    if tag is None:
+        raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % deformer.GetName())
+    return mesh, tag
+
+
+def set_feather(doc, deformer, width, undo=True):
+    """境目のぼかしの幅（長さ）を入れる。0 以下でぼかしを外す。undo=True ならアンドゥ1回分。"""
+    mesh, tag = _feather_target(deformer)
+    width = max(float(width), 0.0)
+    _stop_threads()
+    if undo:
+        doc.StartUndo()
+    try:
+        _apply_feather(doc, deformer, mesh, tag, width, undo)
+    finally:
+        if undo:
+            doc.EndUndo()
+    c4d.EventAdd()
+    return deformer
+
+
+def feather_row(deformer):
+    """パネルの3段目（ぼかし）の中身: (名前, 単位, 値, スライダー範囲)。使えない種類・全体用なら None。"""
+    try:
+        _feather_target(deformer)
+    except SDError:
+        return None
+    size = deformer[c4d.DEFORMOBJECT_SIZE]
+    return FEATHER_LABEL, UNIT_LENGTH, feather_width(deformer), (0.0, max(0.5 * max(size.x, size.y, size.z), 1.0))
+
+
+def _refresh_feather(doc, deformer, mesh, tag, undo=True):
+    """選択範囲や形が変わったあとに、ぼかしの重みを測り直す（ぼかしていなければ何もしない）。"""
+    width = feather_width(deformer)
+    if width > 0.0 and tag is not None:
+        _apply_feather(doc, deformer, mesh, tag, width, undo)
+
+
 def _axes_of(deformer):
     m = deformer.GetMl()
     return _orthonormal(m.v1, m.v2)
@@ -1689,10 +1905,13 @@ def switch_type(doc, deformer, dtype, limit=True):
             new[pid] = deformer[pid]
         # 箱の種類同士: フィールド（ぼかし等を足していればそれも）、モード、方向の角度を引き継ぐ
         fields = None
+        # ぼかし: 箱の種類同士なら頂点マップごと引き継ぐ。ベベルにするときは外す（下で頂点マップを消す）
+        vmap = feather_tag(deformer)
+        feather = (feather_width(deformer), vmap) if old_type in BOX_TYPES and dtype in BOX_TYPES else (0.0, None)
         if old_type in BOX_TYPES and dtype in BOX_TYPES:
             new[c4d.DEFORMOBJECT_MODE] = deformer[c4d.DEFORMOBJECT_MODE]
             fl = deformer[c4d.FIELDS]
-            if fl is not None and (whole or tag in weight_layer_targets(deformer, doc)):
+            if fl is not None and (whole or _weight_source(deformer, tag) in weight_layer_targets(deformer, doc)):
                 # 全体用はユーザーが足したフィールドだけなので、そのまま写す。
                 # 旧版（制限タグ）のデフォーマーは make_field_list でフィールド方式に移す
                 fields = fl
@@ -1711,13 +1930,16 @@ def switch_type(doc, deformer, dtype, limit=True):
             if t.GetType() != c4d.Trestriction:
                 new.InsertTag(t.GetClone(c4d.COPYFLAGS_NONE), new.GetLastTag())
             t = t.GetNext()
-        _set_marker(new, KIND_DEFORMER, tag, whole=whole)
+        _set_marker(new, KIND_DEFORMER, tag, whole=whole, feather=feather if fields is not None else (0.0, None))
 
         new.InsertAfter(deformer)
         new.SetMl(mat)
         doc.AddUndo(c4d.UNDOTYPE_NEWOBJ, new)
         doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, deformer)
         deformer.Remove()
+        if vmap is not None and feather_tag(new) is None and is_marked(vmap, KIND_FEATHER):
+            doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, vmap)  # ベベルにした・引き継げなかったぼかしの頂点マップ
+            vmap.Remove()
         # ベベル（エッジ）から箱の種類にしたときは、使われなくなったエッジ選択タグを消す
         if old_tag is not None and tag != old_tag and is_marked(old_tag, KIND_TAG) and not _tag_still_used(mesh, old_tag, []):
             doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, old_tag)
@@ -1763,14 +1985,24 @@ def add_stacked(doc, deformer, dtype, limit=True):
         fields = None
         if deformer.GetType() in BOX_TYPES and dtype in BOX_TYPES:
             fl = deformer[c4d.FIELDS]
-            if fl is not None and (whole or tag in weight_layer_targets(deformer, doc)):
+            if fl is not None and (whole or _weight_source(deformer, tag) in weight_layer_targets(deformer, doc)):
                 fields = fl
+        src_vmap = feather_tag(deformer) if fields is not None else None
         mat = _configure(new, dtype, tag, info, _axes_for(deformer, info), None, fields, limit)
-        _set_marker(new, KIND_DEFORMER, tag, whole=whole)
+        _set_marker(new, KIND_DEFORMER, tag, whole=whole, feather=(0.0, None))
 
         new.InsertAfter(deformer)
         new.SetMl(mat)
         doc.AddUndo(c4d.UNDOTYPE_NEWOBJ, new)
+        if src_vmap is not None:
+            # ぼかしはデフォーマーごとに持つ（あとで別々に変えられる）ので、頂点マップを複製して向け替える
+            clone = src_vmap.GetClone(c4d.COPYFLAGS_NONE)
+            clone.SetName(_unique_tag_name(mesh, FEATHER_BASENAME))
+            _set_marker(clone, KIND_FEATHER)
+            mesh.InsertTag(clone, src_vmap)
+            doc.AddUndo(c4d.UNDOTYPE_NEWOBJ, clone)
+            _relink_layers(new, src_vmap, clone, doc)
+            _set_marker(new, KIND_DEFORMER, tag, whole=whole, feather=(feather_width(deformer), clone))
         doc.AddUndo(c4d.UNDOTYPE_BITS, deformer)
         doc.SetActiveObject(new, c4d.SELECTION_NEW)
     finally:
@@ -1886,8 +2118,9 @@ def recapture_selection(doc, deformer, limit=True):
                 deformer.SetName(_deformer_name(dtype, tag.GetName()))
             if dtype == c4d.Obevel:
                 _setup_bevel(deformer, tag)
-            else:
+            elif feather_tag(deformer) is None:
                 _relink_fields(deformer, old_tag, tag, doc, limit)
+            # ぼかしていれば、レイヤーは頂点マップを指したまま（下で新しい選択範囲で重みを測り直す）
             _set_marker(deformer, KIND_DEFORMER, tag)
         elif dtype == c4d.Obevel:
             _setup_bevel(deformer, tag)
@@ -1899,6 +2132,7 @@ def recapture_selection(doc, deformer, limit=True):
         for d in sd_deformers_under(mesh):
             if d.GetType() in BOX_TYPES and (d == deformer or get_selection_tag(d) == tag):
                 _refit_in_place(doc, d, info, axes)
+                _refresh_feather(doc, d, mesh, tag)
 
         if old_tag is not None and tag != old_tag and is_marked(old_tag, KIND_TAG) and not _tag_still_used(mesh, old_tag, []):
             doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, old_tag)
@@ -1924,14 +2158,18 @@ def _recapture_whole(doc, deformer, mesh):
         doc.AddUndo(c4d.UNDOTYPE_CHANGE, deformer)
         if old_tag is not None and deformer.GetName() == _deformer_name(dtype, old_tag.GetName()):
             deformer.SetName(_deformer_name(dtype, WHOLE_LABEL))
+        vmap = feather_tag(deformer)
         if dtype == c4d.Obevel:
             if not was_whole:
                 _setup_bevel_whole(deformer)
         else:
-            _unlink_fields(deformer, old_tag, doc)
-        _set_marker(deformer, KIND_DEFORMER, whole=True)
+            _unlink_fields(deformer, vmap if vmap is not None else old_tag, doc)
+        _set_marker(deformer, KIND_DEFORMER, whole=True, feather=(0.0, None))  # 全体用には境目が無いのでぼかしも外す
         if dtype in BOX_TYPES:
             _refit_in_place(doc, deformer, info, whole_frame(info))
+        if vmap is not None and is_marked(vmap, KIND_FEATHER) and not _feather_used_elsewhere(mesh, vmap, deformer):
+            doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, vmap)
+            vmap.Remove()
         if old_tag is not None and is_marked(old_tag, KIND_TAG) and not _tag_still_used(mesh, old_tag, []):
             doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, old_tag)
             old_tag.Remove()
@@ -1959,7 +2197,7 @@ def create_or_switch(doc, dtype, add=False, limit=True):
 # ---------------------------------------------------------------------------
 # 向きの変更・再フィット
 # ---------------------------------------------------------------------------
-def _reorient(doc, deformer, make_axes):
+def _reorient(doc, deformer, make_axes, refresh_feather=False):
     if is_bevel(deformer):
         raise SDError(tr("ベベルには箱や向きがありません（選択範囲のエッジ・ポリゴン・ポイントにかかります）。", "Bevel has no box or direction (it works on the selected edges, polygons or points)."))
     _stop_threads()
@@ -1976,6 +2214,9 @@ def _reorient(doc, deformer, make_axes):
             lever = shear_lever(size, deformer[c4d.DEFORMOBJECT_ANGLE])
             if lever > EPS:
                 deformer[c4d.DEFORMOBJECT_STRENGTH] = old_shift / lever
+        if refresh_feather and not is_whole(deformer):
+            # メッシュを編集したあとのフィット: 境目からの距離も変わるので、ぼかしの重みを測り直す
+            _refresh_feather(doc, deformer, deformer.GetUp(), get_selection_tag(deformer))
     finally:
         doc.EndUndo()
     c4d.EventAdd()
@@ -1983,8 +2224,8 @@ def _reorient(doc, deformer, make_axes):
 
 
 def refit(doc, deformer):
-    """今の向きのまま、選択範囲タグの範囲に箱を合わせ直す。"""
-    return _reorient(doc, deformer, lambda info, axes: axes)
+    """今の向きのまま、選択範囲タグの範囲に箱を合わせ直す（ぼかしていれば、その重みも測り直す）。"""
+    return _reorient(doc, deformer, lambda info, axes: axes, refresh_feather=True)
 
 
 def reset_auto(doc, deformer):
@@ -2334,16 +2575,20 @@ def freeze(doc, deformers):
         for d in deformers:
             mesh = _mesh_of(d)
             tag = get_selection_tag(d)
+            vmap = feather_tag(d)
             if is_bevel(d):
                 _apply_bevel_tool(doc, mesh, d, tag)
             else:
-                pts = _evaluate_only(doc, mesh, d)
+                pts = _evaluate_only(doc, mesh, d)  # ぼかしの重みも効いた形
                 doc.AddUndo(c4d.UNDOTYPE_CHANGE, mesh)
                 mesh.SetAllPoints(pts)
                 mesh.Message(c4d.MSG_UPDATE)
             doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, d)
             d.Remove()
             removed.append(d)
+            if vmap is not None and is_marked(vmap, KIND_FEATHER) and not _feather_used_elsewhere(mesh, vmap, d):
+                doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, vmap)
+                vmap.Remove()
             if tag is not None and is_marked(tag, KIND_TAG) and not _tag_still_used(mesh, tag, removed):
                 doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, tag)
                 tag.Remove()

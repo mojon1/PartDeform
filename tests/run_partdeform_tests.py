@@ -596,6 +596,132 @@ def test_whole_object(doc):
     doc.SetMode(c4d.Mpolygons)
 
 
+def _point_at(obj, x, z):
+    """平面の (x, z) にある点の番号。"""
+    for i, p in enumerate(obj.GetAllPoints()):
+        if abs(p.x - x) < 1e-3 and abs(p.z - z) < 1e-3:
+            return i
+    return None
+
+
+def test_feather(doc):
+    """境目のぼかし: 選んだ範囲の内側で、境目に向かって効きを 0 まで弱める（頂点マップ＋フィールドの変数タグ）。"""
+    print("--- Feather ---")
+    plane = c4d.BaseObject(c4d.Oplane)
+    plane[c4d.PRIM_PLANE_WIDTH] = plane[c4d.PRIM_PLANE_HEIGHT] = 400
+    plane[c4d.PRIM_PLANE_SUBW] = plane[c4d.PRIM_PLANE_SUBH] = 20  # 1マス 20
+    plane.SetName("FeatherPatch")
+    plane = make_editable(doc, plane)
+    plane.SetRelPos(c4d.Vector(0, 0, 1400))
+    original = plane.GetAllPoints()
+    halt()
+    doc.SetActiveObject(plane, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Mpolygons)
+    select_polys(plane, lambda c: abs(c.x) < 100 and abs(c.z) < 100)  # 中央の 200×200
+    d, _how = core.create_or_switch(doc, c4d.Oshear)
+    tag = core.get_selection_tag(d)
+    center, inner, outside = _point_at(plane, 0, 0), _point_at(plane, 80, 0), _point_at(plane, 160, 0)
+    check("Feather: 作成時はぼかし 0（今までどおり）", core.feather_width(d) == 0.0 and core.feather_tag(d) is None
+          and tag in core.weight_layer_targets(d, doc))
+    sharp = deformed_points(doc, plane)
+    # 境目（|x| か |z| が 100）の点のうち、ぼかし無しでいちばん動く点（起点側の辺はもともと動かないので除かれる）
+    border = [i for i, p in enumerate(original) if max(abs(p.x), abs(p.z)) > 99.99 and max(abs(p.x), abs(p.z)) < 100.01]
+    side = max(border, key=lambda i: (sharp[i] - original[i]).GetLength())
+    moved_side = (sharp[side] - original[side]).GetLength()
+    check("Feather: ぼかし無しでは境目の点も動く（折れ目が出る）", moved_side > 1.0, "%.3f" % moved_side)
+
+    # ぼかし 40: 境目で 0、20 内側で 0.5、40 以上内側で 1、選択の外は 0
+    halt()
+    core.set_feather(doc, d, 40.0)
+    vmap = core.feather_tag(d)
+    w = vmap.GetAllHighlevelData() if vmap is not None else []
+    check("Feather: 頂点マップを作り、フィールドをそれに向ける", vmap is not None and vmap.GetName().startswith(core.FEATHER_BASENAME)
+          and core.is_marked(vmap, core.KIND_FEATHER) and core.weight_layer_targets(d, doc) == [vmap]
+          and core.get_selection_tag(d) == tag and abs(core.feather_width(d) - 40.0) < 1e-6)
+    check("Feather: 重み（境目 0・20 内側 0.5・中央 1・外 0）", w and abs(w[side]) < 1e-6 and abs(w[inner] - 0.5) < 1e-6
+          and abs(w[center] - 1.0) < 1e-6 and w[outside] == 0.0, "%s" % ([round(w[i], 3) for i in (side, inner, center, outside)] if w else None))
+    soft = deformed_points(doc, plane)
+    check("Feather: 境目の点は動かない", (soft[side] - original[side]).GetLength() < 1e-3, "%.4f" % (soft[side] - original[side]).GetLength())
+    check("Feather: 幅より内側は今までと同じだけ動く", (soft[center] - sharp[center]).GetLength() < 1e-3)
+    check("Feather: 選択の外は動かない", max((soft[i] - original[i]).GetLength() for i in range(len(original))
+                                            if abs(original[i].x) > 100.01 or abs(original[i].z) > 100.01) < 1e-4)
+    check("Feather: パネルの欄に幅が出る", core.feather_row(d) is not None and abs(core.feather_row(d)[2] - 40.0) < 1e-6)
+
+    # 「選択範囲に限定」は頂点マップのレイヤーを切り替える
+    core.set_selection_limit(doc, d, False)
+    off = core.selection_limit(d)
+    core.set_selection_limit(doc, d, True)
+    check("Feather: 選択範囲に限定のオフ／オン", off is False and core.selection_limit(d) is True and core.weight_layer_targets(d, doc) == [vmap])
+
+    # アンドゥ: 幅を変えてもアンドゥ1回で戻る
+    core.set_feather(doc, d, 60.0)
+    c4d.StopAllThreads()
+    doc.DoUndo()
+    d = core.sd_deformers_under(plane)[0]  # アンドゥで中身が入れ替わることがあるので取り直す
+    w2 = core.feather_tag(d).GetAllHighlevelData()
+    check("Feather: 幅の変更はアンドゥ1回で戻る", abs(core.feather_width(d) - 40.0) < 1e-6 and abs(w2[inner] - 0.5) < 1e-6)
+
+    # 選択を取り直す: 幅はそのまま、新しい境目で測り直す（前の境目 x=100 は 40 内側になる）
+    halt()
+    doc.SetActiveObject(plane, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Mpolygons)
+    select_polys(plane, lambda c: abs(c.x) < 140 and abs(c.z) < 140)
+    halt()
+    doc.SetActiveObject(d, c4d.SELECTION_NEW)
+    d, tag = core.recapture_selection(doc, d)
+    w3 = core.feather_tag(d).GetAllHighlevelData() if core.feather_tag(d) else []
+    check("Feather: 取り直しても幅はそのままで測り直す", abs(core.feather_width(d) - 40.0) < 1e-6 and w3
+          and abs(w3[_point_at(plane, 100, 0)] - 1.0) < 1e-6 and abs(w3[_point_at(plane, 140, 0)]) < 1e-6
+          and core.weight_layer_targets(d, doc) == [core.feather_tag(d)])
+
+    # 種類の切り替え: ぼかしごと引き継ぐ
+    t = core.switch_type(doc, d, c4d.Otaper)
+    check("Feather: 種類を切り替えても引き継ぐ", abs(core.feather_width(t) - 40.0) < 1e-6 and core.feather_tag(t) is not None
+          and core.weight_layer_targets(t, doc) == [core.feather_tag(t)])
+    # 重ね: 頂点マップは別々（片方を変えても、もう片方は変わらない）
+    s = core.add_stacked(doc, t, c4d.Otwist)
+    vt, vs = core.feather_tag(t), core.feather_tag(s)
+    check("Feather: 重ねると頂点マップは別々", vs is not None and vs != vt and abs(core.feather_width(s) - 40.0) < 1e-6
+          and core.weight_layer_targets(s, doc) == [vs])
+    before_t = vt.GetAllHighlevelData()
+    core.set_feather(doc, s, 10.0)
+    check("Feather: 重ねた片方だけ変えられる", core.feather_tag(t).GetAllHighlevelData() == before_t
+          and abs(core.feather_width(s) - 10.0) < 1e-6)
+    core.set_feather(doc, s, 0.0)
+    check("Feather: 0 にすると頂点マップを消して選択範囲タグに戻す", core.feather_tag(s) is None and core.feather_width(s) == 0.0
+          and core.weight_layer_targets(s, doc) == [tag] and vs.GetObject() is None and core.feather_tag(t) is not None)
+    halt()
+    s.Remove()
+
+    # フリーズ: ぼかしの効いた形で焼き込み、頂点マップも消す
+    expected = deformed_points(doc, plane)
+    halt()
+    doc.SetActiveObject(plane, c4d.SELECTION_NEW)
+    core.freeze(doc, core.freeze_targets(doc))
+    check("Feather: フリーズはぼかしの効いた形で焼き込み、頂点マップも消す", not core.sd_deformers_under(plane)
+          and plane.GetTag(c4d.Tvertexmap) is None and max((plane.GetPoint(i) - p).GetLength() for i, p in enumerate(expected)) < 1e-3)
+
+    # ベベル・全体用には境目のぼかしは無い
+    halt()
+    doc.SetActiveObject(plane, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Medges)
+    select_edges(plane, lambda p: abs(p.z) < 1 and p.x > 0)
+    b, _how = core.create_or_switch(doc, c4d.Obevel)
+    halt()
+    doc.SetMode(c4d.Mmodel)
+    doc.SetActiveObject(plane, c4d.SELECTION_NEW)
+    w_d, _how = core.create_or_switch(doc, c4d.Obend)
+    for label, target in (("ベベル", b), ("全体用", w_d)):
+        try:
+            core.set_feather(doc, target, 10.0)
+            ok = False
+        except core.SDError:
+            ok = True
+        check("Feather: %sには使えない（欄も出ない）" % label, ok and core.feather_row(target) is None)
+    halt()
+    doc.SetMode(c4d.Mpolygons)
+
+
 def test_recapture(doc):
     """選択を取り直す: 同じ種類ならタグを書き換えて箱を合わせ直す。種類が変われば付け替えて古いタグを消す。アンドゥ1回。"""
     print("--- Recapture ---")
@@ -1228,6 +1354,7 @@ def _run_all(doc):
     test_tilted_square_patch(doc)
     test_bumpy_patch_shear(doc)
     test_whole_object(doc)
+    test_feather(doc)
     test_recapture(doc)
     test_add_stacked(doc)
     test_selection_limit(doc)
