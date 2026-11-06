@@ -11,7 +11,7 @@ Keep the result as a deformer + selection tag, or **Freeze** it into the mesh.
 - It only creates standard deformers and selection tags, so scenes open with the same shape on machines or render farms without the plugin.
 - English and Japanese UI (Japanese when Cinema 4D runs in Japanese, English otherwise).
 
-> Status: preparing the 1.0.0 release.
+> Latest release: [1.0.0](https://github.com/mojon1/PartDeform/releases/latest) ([changelog](CHANGELOG.md))
 
 ## Requirements
 
@@ -19,11 +19,13 @@ Keep the result as a deformer + selection tag, or **Freeze** it into the mesh.
 
 ## Installation
 
-1. Put the `PartDeform` folder (the one that contains `PartDeform.pyp`) into your Cinema 4D `plugins` folder.
-   The `plugins` folder is inside the preferences folder, which you can open with the button at the bottom left of **Edit > Preferences**.
+1. Download `PartDeform-1.0.0.zip` from [Releases](https://github.com/mojon1/PartDeform/releases/latest) and unzip it.
+2. Put the `PartDeform` folder (the one that contains `PartDeform.pyp`, `partdeform` and `res`) into your Cinema 4D `plugins` folder.
+   The `plugins` folder is inside the preferences folder, which you can open with the button at the bottom left of the Preferences window
+   (**Edit > Preferences**; on macOS it may be under the **Cinema 4D** menu). Create the `plugins` folder if it does not exist.
    You can also keep the folder anywhere and add its location to the plugin search paths in **Preferences > Plugins**.
-2. Restart Cinema 4D.
-3. Open the panel from **Extensions > PartDeform**. Docking it into your layout is handy.
+3. Restart Cinema 4D.
+4. Open the panel from **Extensions > PartDeform**. Docking it into your layout is handy.
 
 The menu contains "PartDeform" (the panel) and six commands, "Bend to Selection" to "Bevel to Selection".
 You can assign the commands to shortcuts or palettes in the Command Manager.

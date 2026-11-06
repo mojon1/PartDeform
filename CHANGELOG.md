@@ -1,6 +1,6 @@
 # Changelog / 変更履歴
 
-## 1.0.0 (unreleased / 準備中)
+## 1.0.0 (2026-11-06)
 
 First public release. / 最初の公開版。
 
