@@ -8,13 +8,13 @@
   フィールドのレイヤーは「有効」オフで残るので、いつでも戻せる。
 - **Whole object.** With nothing selected, in Model mode, or on an object that is not an editable mesh
   (a primitive, a generator such as Subdivision Surface or Cloner, or a Null group), the deformer is applied to the whole object.
-  No selection tag is made. The box fits the current shape including child objects and is aligned to the object's axes
+  No selection tag is made. The deformer is sized to the current shape including child objects and aligned to the object's axes
   (the longest side becomes the main axis, with the anchor at its minus end). Update Selection switches between a part and the whole.
   Bevel on the whole object rounds only corners of 40° or more.
   On an object that is not a mesh, Update Selection, Limit to Selection and Freeze become available once you make it editable with C.
   **オブジェクト全体にかけられるようにした。** 何も選択していないとき・モデルモードのとき・編集可能なメッシュになっていないオブジェクト
   （プリミティブ、サブディビジョンサーフェイスやクローナーなどのジェネレーター、ヌルでまとめたグループ）では、オブジェクト全体にかける。
-  選択範囲タグは作らない。箱は子オブジェクトも含めた今の形に合わせ、向きはオブジェクトの軸にそろえる（いちばん長い軸が主軸、起点はそのマイナス側の端）。
+  選択範囲タグは作らない。デフォーマーの大きさは子オブジェクトも含めた今の形に合わせ、向きはオブジェクトの軸にそろえる（いちばん長い軸が主軸、起点はそのマイナス側の端）。
   「選択を取り直す」で、一部と全体を切り替えられる。全体のベベルは、40°以上の角だけ丸める。
   メッシュになっていないオブジェクトでは、「選択を取り直す」「選択範囲に限定」「フリーズ」は C キーで編集可能にすると使える。
 - **Feather.** A new Feather field in the panel fades the effect inward from the border of the selection,
@@ -28,13 +28,13 @@
 - **Freeze tells you about child objects.** Freeze bakes only the mesh itself, so child objects that were deformed together
   go back to their original shape. The message now says so.
   フリーズで焼き込むのはメッシュそのものだけなので、一緒に変形していた子オブジェクトは元の形に戻る。そのことをメッセージで知らせるようにした。
-- **Fix: the box could come out tilted by a few degrees.** On a surface where details are placed unevenly
+- **Fix: the deformer could be placed a few degrees off.** On a surface where details are placed unevenly
   (for example, raised blocks scattered over a plane), the automatic direction drifted a few degrees away from the edges.
   The tip then did not move by the set amount along its whole width (in one scene, only 78–100% of it depending on the spot),
-  and the anchor edge moved slightly. The box now lines up exactly with the edge flow.
-  **修正: 箱が数度傾くことがあった。** 凸などが偏って並ぶ面（平面に押し出しが不規則に散らばっている等）では、
+  and the anchor edge moved slightly. The deformer now lines up exactly with the edge flow.
+  **修正: デフォーマーが数度傾いて置かれることがあった。** 凸などが偏って並ぶ面（平面に押し出しが不規則に散らばっている等）では、
   自動の向きがエッジから数度ずれていた。そのため先端の辺が場所によって指定した量だけずれず（ある例では指定値の 78〜100%）、
-  起点の辺もわずかに動いていた。箱がエッジの流れにきちんと揃うようにした。
+  起点の辺もわずかに動いていた。デフォーマーがエッジの流れにきちんと揃うようにした。
 
 ## 1.0.0 (2026-11-06)
 
