@@ -54,6 +54,7 @@ You can assign the commands to shortcuts or palettes in the Command Manager.
 ## Usage
 
 1. On an editable polygon object, select polygons, points or edges.
+   With nothing selected (in Points, Edges or Polygons mode), the whole object is used, the same as Select All.
 2. Press a type button in the panel (Bend, Shear, Taper, Twist, Bulge, Bevel).
    - A deformer fitted to the selection is added, and only the selected part is deformed.
    - It starts with a small amount so the direction is easy to see (Bend / Twist 45°, Taper / Bulge 30%, Shear offsets the tip by about 20% of the length).
@@ -99,6 +100,7 @@ Messages are shown in the Cinema 4D status bar and the console.
 - **Bend direction**: toward the surface normal for a surface selection; the thinner direction of the cross-section for protrusions.
 - **Follows the edge flow**: the in-plane direction and the rotation around the main axis follow the edges of the selected polygons, so the box lines up with the edges even on slanted faces or square-like selections.
 - When the border surrounds the selection (for example, only the middle of a face is selected), the direction is taken from the shape.
+- With the whole object (nothing selected), the direction is taken from the shape, and the anchor is at the minus end of the object's axis (the bottom for a tall object), like a standard deformer.
 
 ## Bevel
 

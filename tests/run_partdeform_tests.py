@@ -23,10 +23,15 @@ def check(name, cond, detail=""):
 
 
 def make_editable(doc, prim):
+    # 前のテストの最後の操作（モードの切り替えなど）で裏の計算が走っていることがある。止めずに
+    # オブジェクトを足すと、その計算が消えかけのデータを読んで C4D ごと落ちる（2026-11-06 に数回に1回落ちた）。
+    # 後ろの halt() は、呼んだ側がすぐ位置などを書き換えるため
+    halt()
     doc.InsertObject(prim)
     res = c4d.utils.SendModelingCommand(c4d.MCOMMAND_MAKEEDITABLE, [prim], c4d.MODELINGCOMMANDMODE_ALL, c4d.BaseContainer(), doc)
     obj = res[0]
     doc.InsertObject(obj)
+    halt()
     return obj
 
 
@@ -42,6 +47,7 @@ def build_scene(doc):
     cube = make_editable(doc, cube)
     pts = cube.GetAllPoints()
     ps = cube.GetPolygonS()
+    halt()
     ps.DeselectAll()
     for i, p in enumerate(cube.GetAllPolygons()):
         c = (pts[p.a] + pts[p.b] + pts[p.c] + pts[p.d]) / 4
@@ -103,9 +109,16 @@ def centre(pts, p):
     return sum((pts[i] for i in ids), c4d.Vector()) / len(ids)
 
 
+def halt():
+    """描画・評価のスレッドを止める。選択やモードを書き換える前に必ず呼ぶ（止めないと C4D が落ちることがある）。"""
+    c4d.StopAllThreads()
+
+
 def select_polys(obj, pred):
+    halt()
     pts = obj.GetAllPoints()
     bs = obj.GetPolygonS()
+    halt()
     bs.DeselectAll()
     for i, p in enumerate(obj.GetAllPolygons()):
         if pred(centre(pts, p)):
@@ -113,8 +126,10 @@ def select_polys(obj, pred):
 
 
 def select_edges(obj, pred):
+    halt()
     pts = obj.GetAllPoints()
     es = obj.GetEdgeS()
+    halt()
     es.DeselectAll()
     for i, p in enumerate(obj.GetAllPolygons()):
         for side, (a, b) in enumerate(((p.a, p.b), (p.b, p.c), (p.c, p.d), (p.d, p.a))):
@@ -168,6 +183,7 @@ def test_face_shear(doc):
     cube.SetName("FaceShear")
     cube = make_editable(doc, cube)
     cube.SetRelPos(c4d.Vector(0, 0, 600))
+    halt()
     doc.SetActiveObject(cube, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Mpolygons)
     select_polys(cube, lambda c: c.x > 99)
@@ -212,6 +228,7 @@ def test_face_shear(doc):
 
     # テーパー・膨張も長さで指定（いちばん外側の点が、箱の幅の広い方向にその量だけ動く）
     for dtype, cmd, label in ((c4d.Otaper, core.ID_CMD_TAPER, "テーパー"), (c4d.Obulge, core.ID_CMD_BULGE, "膨張")):
+        halt()
         doc.SetActiveObject(d, c4d.SELECTION_NEW)
         c4d.CallCommand(cmd)
         d = core.active_sd_deformer(doc)
@@ -246,6 +263,7 @@ def test_tilted_square_patch(doc):
     plane.Message(c4d.MSG_UPDATE)
     edge_u = (rot * c4d.Vector(1, 0, 0) - rot * c4d.Vector(0, 0, 0)).GetNormalized()
     edge_v = (rot * c4d.Vector(0, 0, 1) - rot * c4d.Vector(0, 0, 0)).GetNormalized()
+    halt()
     doc.SetActiveObject(plane, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Mpolygons)
     inv = ~rot
@@ -282,6 +300,7 @@ def test_bumpy_patch_shear(doc):
     c4d.utils.SendModelingCommand(c4d.ID_MODELING_EXTRUDE_TOOL, [plane], c4d.MODELINGCOMMANDMODE_POLYGONSELECTION, bc, doc)
     plane.Message(c4d.MSG_UPDATE)
     # x = -40 より先（升目6列ぶん）を選ぶ。起点は未選択とつながる x = -40 の辺、先端は x = 200 の辺
+    halt()
     doc.SetActiveObject(plane, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Mpolygons)
     select_polys(plane, lambda c: c.x > -40 + 1e-3)
@@ -304,6 +323,94 @@ def test_bumpy_patch_shear(doc):
     check("BumpyPatch: 起点の辺は動かない", root and max(root) < 1e-3, "%.4f" % max(root) if root else "")
 
 
+def test_nothing_selected(doc):
+    """何も選択していなければ全選択と同じ: タグは全要素、箱はオブジェクト全体、起点は軸のマイナス側。メッシュの選択は変えない。"""
+    print("--- NothingSelected ---")
+    cyl = c4d.BaseObject(c4d.Ocylinder)
+    cyl[c4d.PRIM_CYLINDER_RADIUS] = 30
+    cyl[c4d.PRIM_CYLINDER_HEIGHT] = 300
+    cyl[c4d.PRIM_CYLINDER_HSUB] = 10
+    cyl.SetName("WholeTube")
+    cyl = make_editable(doc, cyl)
+    cyl.SetRelPos(c4d.Vector(1500, 0, 0))
+    halt()
+    doc.SetActiveObject(cyl, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Mpolygons)
+    cyl.GetPolygonS().DeselectAll()
+    check("NothingSelected: 何も選んでいないと判定", core.nothing_selected(doc, cyl))
+    before = cyl.GetAllPoints()
+    d = ui.do_type(doc, c4d.Obend)
+    check("NothingSelected: ポリゴン: 屈曲を作成", d is not None and d.GetType() == c4d.Obend)
+    if d is None:
+        return
+    tag = core.get_selection_tag(d)
+    n_poly = cyl.GetPolygonCount()
+    check("NothingSelected: ポリゴン: タグは全ポリゴン", tag is not None and tag.GetType() == c4d.Tpolygonselection
+          and tag.GetBaseSelect().GetCount() == n_poly, "%s / %d" % (tag.GetBaseSelect().GetCount() if tag else None, n_poly))
+    check("NothingSelected: メッシュの選択は変えない", cyl.GetPolygonS().GetCount() == 0)
+    m = d.GetMl()
+    size = d[c4d.DEFORMOBJECT_SIZE]
+    check("NothingSelected: 主軸は円柱の軸（+Y）で起点は下", m.v2.y > 0.9999, str(m.v2))
+    check("NothingSelected: 箱はオブジェクト全体（高さ 300）", abs(size.y - 300) < 1e-3, str(size))
+    pts = deformed_points(doc, cyl)
+    bottom = max((pts[i] - p).GetLength() for i, p in enumerate(before) if p.y < -149.9)
+    top = max((pts[i] - p).GetLength() for i, p in enumerate(before) if p.y > 149.9)
+    check("NothingSelected: 下端は動かず上端が曲がる", bottom < 1e-3 and top > 10, "下 %.4f / 上 %.2f" % (bottom, top))
+
+    # 寝かせた平面: 形から主軸、起点はオブジェクトの軸のマイナス側（-X）
+    plane = c4d.BaseObject(c4d.Oplane)
+    plane[c4d.PRIM_PLANE_WIDTH] = 400
+    plane[c4d.PRIM_PLANE_HEIGHT] = 200
+    plane.SetName("WholePlane")
+    plane = make_editable(doc, plane)
+    plane.SetRelPos(c4d.Vector(1500, 0, 600))
+    halt()
+    doc.SetActiveObject(plane, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Mpoints)
+    plane.GetPointS().DeselectAll()
+    d, how = core.create_or_switch(doc, c4d.Oshear)
+    tag = core.get_selection_tag(d)
+    check("NothingSelected: ポイント: タグは全ポイント", tag.GetType() == c4d.Tpointselection
+          and tag.GetBaseSelect().GetCount() == plane.GetPointCount())
+    check("NothingSelected: 平面の主軸は長い方（+X）で起点は -X", d.GetMl().v2.x > 0.9999, str(d.GetMl().v2))
+
+    # エッジ: ベベルは全エッジのエッジ選択タグ
+    halt()
+    doc.SetActiveObject(plane, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Medges)
+    plane.GetEdgeS().DeselectAll()
+    d, how = core.create_or_switch(doc, c4d.Obevel)
+    tag = core.get_selection_tag(d)
+    check("NothingSelected: エッジ: ベベルのタグは全エッジ", tag is not None and tag.GetType() == c4d.Tedgeselection
+          and sorted(core._edge_ids_from(tag.GetBaseSelect(), plane)) == sorted(core._all_edge_ids(plane)))
+
+    # 選択を取り直す: 一部を選んで作ったあと、選択を外して取り直すと全体になる
+    halt()
+    doc.SetActiveObject(cyl, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Mpolygons)
+    select_polys(cyl, lambda c: c.y > 100)
+    d, how = core.create_or_switch(doc, c4d.Otaper)
+    part = core.get_selection_tag(d).GetBaseSelect().GetCount()
+    halt()
+    cyl.GetPolygonS().DeselectAll()
+    d, tag = core.recapture_selection(doc, d)
+    check("NothingSelected: 取り直し: 選択を外すと全体", part < n_poly and tag.GetBaseSelect().GetCount() == n_poly,
+          "%d -> %d / %d" % (part, tag.GetBaseSelect().GetCount(), n_poly))
+
+    # モデルモードでは今までどおり「モードで選択してください」
+    halt()
+    doc.SetActiveObject(cyl, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Mmodel)
+    try:
+        core.create(doc, c4d.Obend)
+        ok = False
+    except core.SDError:
+        ok = True
+    check("NothingSelected: モデルモードでは作らない", ok)
+    halt()
+    doc.SetMode(c4d.Mpolygons)
+
+
 def test_recapture(doc):
     """選択を取り直す: 同じ種類ならタグを書き換えて箱を合わせ直す。種類が変われば付け替えて古いタグを消す。アンドゥ1回。"""
     print("--- Recapture ---")
@@ -314,6 +421,7 @@ def test_recapture(doc):
     plane = make_editable(doc, plane)
     plane.SetRelPos(c4d.Vector(600, 0, -600))
     original = plane.GetAllPoints()
+    halt()
     doc.SetActiveObject(plane, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Mpolygons)
     select_polys(plane, lambda c: c.x > 0 and abs(c.z) < 60)
@@ -323,6 +431,7 @@ def test_recapture(doc):
     # 別の場所を選び直して（メッシュの選択はデフォーマーを選んでも残る）、取り直す
     select_polys(plane, lambda c: c.x < -100 and abs(c.z) < 40)
     want = set(i for i, f in enumerate(plane.GetPolygonS().GetAll(plane.GetPolygonCount())) if f)
+    halt()
     doc.SetActiveObject(d, c4d.SELECTION_NEW)
     d, tag2 = core.recapture_selection(doc, d)
     got = set(i for i, f in enumerate(tag2.GetBaseSelect().GetAll(plane.GetPolygonCount())) if f)
@@ -340,8 +449,10 @@ def test_recapture(doc):
     check("Recapture: 新しい選択範囲の外は動かない", outside_move < 1e-4, "%.5f" % outside_move)
 
     # ポイントで選び直す → ポイント選択タグに付け替え、古いポリゴン選択タグは消える
+    halt()
     doc.SetMode(c4d.Mpoints)
     ps = plane.GetPointS()
+    halt()
     ps.DeselectAll()
     for i, p in enumerate(plane.GetAllPoints()):
         if p.x > 100 and abs(p.z) < 50:
@@ -359,6 +470,7 @@ def test_recapture(doc):
           and d.GetMl().off.x < -100, t.GetName() if t else "")
 
     # ベベル（エッジ）も取り直せる
+    halt()
     doc.SetActiveObject(plane, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Medges)
     select_edges(plane, lambda p: abs(p.z) < 1 and p.x > 0)
@@ -366,6 +478,7 @@ def test_recapture(doc):
     btag = core.get_selection_tag(b)
     select_edges(plane, lambda p: abs(p.x) < 1 and p.z > 0)
     want_edges = set(core._edge_ids_from(plane.GetEdgeS(), plane))
+    halt()
     doc.SetActiveObject(b, c4d.SELECTION_NEW)
     b, btag2 = core.recapture_selection(doc, b)
     got_edges = set(core._edge_ids_from(btag2.GetBaseSelect(), plane))
@@ -382,6 +495,7 @@ def test_add_stacked(doc):
     cube.SetName("AddStacked")
     cube = make_editable(doc, cube)
     cube.SetRelPos(c4d.Vector(600, 0, 600))
+    halt()
     doc.SetActiveObject(cube, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Mpolygons)
     select_polys(cube, lambda c: c.y > 99)
@@ -396,6 +510,7 @@ def test_add_stacked(doc):
     check("AddStacked: 同じ向き", (ds[0].GetMl().v2 - ds[1].GetMl().v2).GetLength() < 1e-6 and (ds[0].GetMl().off - ds[1].GetMl().off).GetLength() < 1e-6)
     check("AddStacked: 追加したものが選択される", core.active_sd_deformer(doc) == ds[1])
     expected = deformed_points(doc, cube)
+    halt()
     doc.SetActiveObject(cube, c4d.SELECTION_NEW)
     ui.do_freeze(doc)  # パネルの「フリーズ」と同じ処理
     cube = doc.SearchObject("AddStacked")
@@ -427,6 +542,7 @@ def test_selection_limit(doc):
     pipe.SetName("LimitPipe")
     pipe = make_editable(doc, pipe)
     pipe.SetRelPos(c4d.Vector(0, 0, 1200))
+    halt()
     doc.SetActiveObject(pipe, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Mpolygons)
     select_polys(pipe, lambda c: abs(c.y) < 50)  # 真ん中の帯（両端とも選択していない部分につながる）
@@ -473,6 +589,7 @@ def test_selection_limit(doc):
     # パネルのチェック（デフォーマー選択中）: そのデフォーマーを切り替え、既定値にもなる
     saved_default = ui.limit_default()
     try:
+        halt()
         doc.SetActiveObject(d, c4d.SELECTION_NEW)
         ui.do_limit(doc, True)
         check("SelectionLimit: パネル: 選択中のデフォーマーがオンになる", core.selection_limit(d) is True)
@@ -489,6 +606,7 @@ def test_selection_limit(doc):
         # 選択を取り直してもオフのまま（レイヤーのリンクだけ付け替える）
         pipe = doc.SearchObject("LimitPipe")
         select_polys(pipe, lambda c: abs(c.y) < 80)
+        halt()
         doc.SetActiveObject(tw, c4d.SELECTION_NEW)
         doc.SetMode(c4d.Mpolygons)
         tw, _tag = core.recapture_selection(doc, tw)
@@ -496,6 +614,7 @@ def test_selection_limit(doc):
 
         # フリーズ: オフのままの変形（先の部分も）が焼き込まれ、タグも消える
         expected = deformed_points(doc, pipe)
+        halt()
         doc.SetActiveObject(pipe, c4d.SELECTION_NEW)
         ui.do_freeze(doc)
         pipe = doc.SearchObject("LimitPipe")
@@ -505,6 +624,7 @@ def test_selection_limit(doc):
               and not any(t.GetName().startswith(core.SELTAG_BASENAME) for t in pipe.GetTags()))
 
         # 既定値オフで作ると、パネルのチェックはオフを表示する（作成時の扱い）
+        halt()
         doc.SetActiveObject(pipe, c4d.SELECTION_NEW)
         select_polys(pipe, lambda c: c.y > 150)
         made = ui.do_type(doc, c4d.Oshear)
@@ -536,6 +656,7 @@ def test_panel_rows(doc):
     cube.SetName("PanelRows")
     cube = make_editable(doc, cube)
     cube.SetRelPos(c4d.Vector(-600, 0, 600))
+    halt()
     doc.SetActiveObject(cube, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Mpolygons)
     select_polys(cube, lambda c: c.y > 99)
@@ -569,6 +690,7 @@ def test_panel_rows(doc):
           abs(d[c4d.DEFORMOBJECT_ANGLE] - angle_before) < 1e-9 and abs(d[c4d.DEFORMOBJECT_STRENGTH] - deg(30.0)) < 1e-9)
 
     # ツイスト: 1段目＝角度（ひねる角度）、2段目は無し
+    halt()
     doc.SetActiveObject(d, c4d.SELECTION_NEW)
     c4d.CallCommand(core.ID_CMD_TWIST)
     d = core.active_sd_deformer(doc)
@@ -611,6 +733,7 @@ def test_panel_rows(doc):
           abs(d[c4d.DEFORMOBJECT_ANGLE] - angle0) < 1e-9 and abs(d[c4d.DEFORMOBJECT_STRENGTH] - strength0) < 1e-9)
 
     # 屈曲で向きを 90° にしてからシアーへ: 向きを引き継ぎ、ずれは作成時と同じ（主軸の長さの 20%）
+    halt()
     doc.SetActiveObject(d, c4d.SELECTION_NEW)
     c4d.CallCommand(core.ID_CMD_BEND)
     ui.do_direction(doc, deg(90.0))
@@ -634,6 +757,7 @@ def test_pick_hit(doc):
     cube[c4d.PRIM_CUBE_SUBX] = cube[c4d.PRIM_CUBE_SUBY] = cube[c4d.PRIM_CUBE_SUBZ] = 4
     cube.SetName("PickHit")
     cube = make_editable(doc, cube)
+    halt()
     doc.SetActiveObject(cube, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Mpolygons)
     select_polys(cube, lambda c: c.y > 99)
@@ -666,6 +790,7 @@ def test_legacy_marker_and_language(doc):
     cube[c4d.PRIM_CUBE_SUBX] = cube[c4d.PRIM_CUBE_SUBY] = cube[c4d.PRIM_CUBE_SUBZ] = 2
     cube.SetName("Legacy")
     cube = make_editable(doc, cube)
+    halt()
     doc.SetActiveObject(cube, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Mpolygons)
     select_polys(cube, lambda c: c.y > 99)
@@ -713,6 +838,7 @@ def test_bevel(doc):
     cube.SetName("BevelBox")
     cube = make_editable(doc, cube)
     cube.SetRelPos(c4d.Vector(-600, 0, 600))
+    halt()
     doc.SetActiveObject(cube, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Medges)
     # 上面の外周のエッジ（ポイントが2つとも上面の外周にあるもの）
@@ -748,6 +874,7 @@ def test_bevel(doc):
     doc.ExecutePasses(None, True, True, True, c4d.BUILDFLAGS_NONE)
     expected = sorted_points(cube.GetDeformCache().GetAllPoints())
     expected_polys = cube.GetDeformCache().GetPolygonCount()
+    halt()
     doc.SetActiveObject(cube, c4d.SELECTION_NEW)
     meshes = core.freeze(doc, core.freeze_targets(doc))
     cube = doc.SearchObject("BevelBox")
@@ -765,6 +892,7 @@ def test_bevel(doc):
 
     # ベベル（エッジ）→ テーパー: エッジの点からポイント選択タグを作り、使われなくなったエッジのタグは消す
     d = ds[0]
+    halt()
     doc.SetActiveObject(d, c4d.SELECTION_NEW)
     t = core.switch_type(doc, d, c4d.Otaper)
     ttag = core.get_selection_tag(t)
@@ -777,6 +905,7 @@ def test_bevel(doc):
     check("Bevel: テーパーにベベルを重ねる", how == "add" and b.GetType() == c4d.Obevel and b[c4d.O_BEVEL_MODE_COMPONENT_TYPE] == 0
           and core.get_selection_tag(b) == ttag)
     doc.ExecutePasses(None, True, True, True, c4d.BUILDFLAGS_NONE)
+    halt()
     doc.SetActiveObject(cube, c4d.SELECTION_NEW)
     core.freeze(doc, core.freeze_targets(doc))
     cube = doc.SearchObject("BevelBox")
@@ -791,6 +920,7 @@ def test_bevel(doc):
 def run_pattern(doc, name, mode, select, create_cmd, switch_cmd, expect_y, expect_bottom):
     print("--- %s ---" % name)
     obj = doc.SearchObject(name)
+    halt()
     doc.SetActiveObject(obj, c4d.SELECTION_NEW)
     doc.SetMode(mode)
     select(obj)
@@ -865,6 +995,7 @@ def run_pattern(doc, name, mode, select, create_cmd, switch_cmd, expect_y, expec
     check(name + ": アンドゥ1回で戻る", max_diff(back["points"], before["points"]) < 1e-6 and len(core.sd_deformers_under(obj_back)) == 1,
           "diff=%.6f deformers=%d" % (max_diff(back["points"], before["points"]), len(core.sd_deformers_under(obj_back))))
     # もう一度フリーズして確定状態で残す
+    halt()
     doc.SetActiveObject(obj_back, c4d.SELECTION_NEW)
     ui.do_freeze(doc)  # パネルの「フリーズ」と同じ処理
 
@@ -911,6 +1042,7 @@ def _run_all(doc):
     test_face_shear(doc)
     test_tilted_square_patch(doc)
     test_bumpy_patch_shear(doc)
+    test_nothing_selected(doc)
     test_recapture(doc)
     test_add_stacked(doc)
     test_selection_limit(doc)

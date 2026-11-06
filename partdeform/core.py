@@ -116,6 +116,7 @@ SELTAG_BASENAME = "PD_Sel"
 COHERENCE_SURFACE = 0.5  # 平均法線の揃い具合。これ以上なら「面」として扱う
 THICKNESS_RATIO = 0.3  # 法線方向の厚み / 面内の長さ。これ以上なら法線を主軸にする
 END_BAND = 0.1  # 起点判定で「端」とみなす範囲（主軸方向の長さに対する割合）
+ROOT_TIE_RATIO = 0.01  # 両端とオブジェクトの中心との距離の差がこの割合（主軸方向の長さに対する）以下なら同じとみなす
 BOUNDARY_OFFSET_RATIO = 0.1  # 境目→遠い部分のずれが、選択範囲の対角のこの割合未満なら方向なしとみなす
 SNAP_ANGLE = 15.0  # 自動の主軸を、オブジェクトの軸や形の主軸に揃える角度
 EDGE_ALIGN_MIN = 0.3  # エッジの向きがこの割合以上そろっていれば、面の中の向き・H 角度をエッジの流れに合わせる
@@ -579,48 +580,52 @@ class SelectionInfo(object):
         self.object_center = obj.GetMp()
 
 
-def selection_from_component_mode(doc, obj):
-    """今のモードと選択から (タグ種別, 点ID集合, ポリゴンID集合, 説明) を返す。"""
+def nothing_selected(doc, obj):
+    """今のモード（ポイント・エッジ・ポリゴン）で何も選択していなければ True。
+
+    そのときは全選択と同じに扱う（オブジェクト全体にかける）。ほかのモードでは False。
+    """
     mode = doc.GetMode()
+    if mode == c4d.Mpolygons:
+        return not any(obj.GetPolygonS().GetAll(obj.GetPolygonCount()))
+    if mode == c4d.Mpoints:
+        return not any(obj.GetPointS().GetAll(obj.GetPointCount()))
+    if mode == c4d.Medges:
+        return not _edge_ids_from(obj.GetEdgeS(), obj)
+    return False
+
+
+def selection_from_component_mode(doc, obj):
+    """今のモードと選択から (タグ種別, 点ID集合, ポリゴンID集合, 説明) を返す。
+
+    何も選択していなければ、全選択と同じ（そのモードの要素すべて）にする。
+    """
+    mode = doc.GetMode()
+    if mode not in (c4d.Mpolygons, c4d.Mpoints, c4d.Medges):
+        raise SDError(tr("ポイント・エッジ・ポリゴンのどれかのモードで、変形したい部分を選択してください（何も選択しなければ全体にかかります）。",
+                         "Select the part to deform in Points, Edges or Polygons mode (with nothing selected, the whole object is used)."))
     pcnt = obj.GetPointCount()
     vcnt = obj.GetPolygonCount()
+    if pcnt < 2 or vcnt == 0:
+        raise SDError(tr("「%s」にはポリゴンがありません。", "\"%s\" has no polygons.") % obj.GetName())
     polys = obj.GetAllPolygons()
     if mode == c4d.Mpolygons:
-        bs = obj.GetPolygonS()
-        flags = bs.GetAll(vcnt)
-        poly_ids = [i for i, f in enumerate(flags) if f]
-        if not poly_ids:
-            raise SDError(tr("ポリゴンが選択されていません。", "No polygons are selected."))
+        flags = obj.GetPolygonS().GetAll(vcnt)
+        poly_ids = [i for i, f in enumerate(flags) if f] or list(range(vcnt))
         pts = set()
         for i in poly_ids:
             pts.update(_poly_ids(polys[i]))
         return c4d.Tpolygonselection, pts, set(poly_ids), tr("ポリゴン %d 個", "%d polygons") % len(poly_ids)
     if mode == c4d.Mpoints:
-        bs = obj.GetPointS()
-        flags = bs.GetAll(pcnt)
-        pts = set(i for i, f in enumerate(flags) if f)
-        if not pts:
-            raise SDError(tr("ポイントが選択されていません。", "No points are selected."))
+        flags = obj.GetPointS().GetAll(pcnt)
+        pts = set(i for i, f in enumerate(flags) if f) or set(range(pcnt))
         return c4d.Tpointselection, pts, _polys_inside(polys, pts), tr("ポイント %d 個", "%d points") % len(pts)
-    if mode == c4d.Medges:
-        bs = obj.GetEdgeS()
-        flags = bs.GetAll(vcnt * 4)
-        pts = set()
-        n_edges = 0
-        for e, f in enumerate(flags):
-            if not f:
-                continue
-            p = polys[e // 4]
-            side = e % 4
-            pair = ((p.a, p.b), (p.b, p.c), (p.c, p.d), (p.d, p.a))[side]
-            if pair[0] == pair[1]:
-                continue
-            pts.update(pair)
-            n_edges += 1
-        if not pts:
-            raise SDError(tr("エッジが選択されていません。", "No edges are selected."))
-        return c4d.Tpointselection, pts, _polys_inside(polys, pts), tr("エッジ %d 本", "%d edges") % n_edges
-    raise SDError(tr("ポイント・エッジ・ポリゴンのどれかのモードで、変形したい部分を選択してください。", "Select the part to deform in Points, Edges or Polygons mode."))
+    edge_ids = _edge_ids_or_all(obj)
+    pts = set()
+    for e in edge_ids:
+        p = polys[e // 4]
+        pts.update(((p.a, p.b), (p.b, p.c), (p.c, p.d), (p.d, p.a))[e % 4])
+    return c4d.Tpointselection, pts, _polys_inside(polys, pts), tr("エッジ %d 本", "%d edges") % len(edge_ids)
 
 
 def _polys_inside(polys, point_set):
@@ -664,6 +669,21 @@ def _edge_ids_from(bs, obj):
         if a != b:
             out.append(e)
     return out
+
+
+def _all_edge_ids(obj):
+    """すべてのエッジ（ポリゴン番号×4＋辺。三角形の長さの無い辺は除く）。エッジの全選択と同じ。"""
+    out = []
+    for i, p in enumerate(obj.GetAllPolygons()):
+        for side, (a, b) in enumerate(((p.a, p.b), (p.b, p.c), (p.c, p.d), (p.d, p.a))):
+            if a != b:
+                out.append(i * 4 + side)
+    return out
+
+
+def _edge_ids_or_all(obj):
+    """選択中のエッジ。何も選択していなければ、すべてのエッジ（全選択と同じ）。"""
+    return _edge_ids_from(obj.GetEdgeS(), obj) or _all_edge_ids(obj)
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +810,8 @@ def root_is_max(info, y):
 
     1) 未選択部分と接している点（境界）が片方の端に偏っていれば、その端。
     2) 決まらなければ、オブジェクトの中心に近い端。
+    3) それも同じ（何も選択せずオブジェクト全体にかけたときなど）なら、オブジェクトの軸の
+       マイナス側の端（縦長なら下）。標準のデフォーマーと同じ置き方にする。
     """
     pts = info.points
     ys = [p.Dot(y) for p in pts]
@@ -815,7 +837,12 @@ def root_is_max(info, y):
     c = info.object_center
     lo_c = sum(lo_pts, c4d.Vector()) / max(len(lo_pts), 1)
     hi_c = sum(hi_pts, c4d.Vector()) / max(len(hi_pts), 1)
-    return (hi_c - c).GetLength() < (lo_c - c).GetLength()
+    d_lo, d_hi = (lo_c - c).GetLength(), (hi_c - c).GetLength()
+    if abs(d_hi - d_lo) > ROOT_TIE_RATIO * length:
+        return d_hi < d_lo
+    # 同じ: y のいちばん大きい成分がマイナスなら、+側の端がオブジェクトの軸のマイナス側
+    comps = (y.x, y.y, y.z)
+    return max(comps, key=abs) < 0
 
 
 def orient_root(info, axes):
@@ -1344,7 +1371,7 @@ def create(doc, dtype, limit=True):
     if dtype == c4d.Obevel and doc.GetMode() == c4d.Medges:
         # ベベルはエッジのままで使う（箱の種類は、エッジの点をポイント選択タグにする）
         tag_type = c4d.Tedgeselection
-        edge_ids = _edge_ids_from(obj.GetEdgeS(), obj)
+        edge_ids = _edge_ids_or_all(obj)
     info = SelectionInfo(obj, pts, poly_ids)
     axes = auto_frame(info) if dtype in BOX_TYPES else None
 
@@ -1545,7 +1572,7 @@ def recapture_selection(doc, deformer):
     ids = pts
     if dtype == c4d.Obevel and doc.GetMode() == c4d.Medges:
         tag_type = c4d.Tedgeselection
-        ids = _edge_ids_from(mesh.GetEdgeS(), mesh)
+        ids = _edge_ids_or_all(mesh)
     elif tag_type == c4d.Tpolygonselection:
         ids = poly_ids
     old_tag = get_selection_tag(deformer)

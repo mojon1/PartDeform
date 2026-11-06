@@ -6,6 +6,10 @@
   (for example, bend the middle of a pipe and let the rest follow). The Fields layer stays but is disabled, so you can switch back at any time.
   パネルに「選択範囲に限定」を追加。オフにすると標準のデフォーマーと同じ動きになる（パイプの途中を曲げて、先の部分も付いてこさせるなど）。
   フィールドのレイヤーは「有効」オフで残るので、いつでも戻せる。
+- **Nothing selected = whole object.** With no polygons, points or edges selected, the deformer is applied to the whole object,
+  the same as Select All (also for Update Selection). The anchor is then at the minus end of the object's axis (the bottom for a tall object).
+  何も選択していなければ、全選択と同じくオブジェクト全体にかかるようにした（「選択を取り直す」も同じ）。
+  起点はオブジェクトの軸のマイナス側の端（縦長なら下）。
 - **Fix: the box could come out tilted by a few degrees.** On a surface where details are placed unevenly
   (for example, raised blocks scattered over a plane), the automatic direction drifted a few degrees away from the edges.
   The tip then did not move by the set amount along its whole width (in one scene, only 78–100% of it depending on the spot),

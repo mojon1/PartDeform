@@ -140,8 +140,12 @@ def do_type(doc, dtype, add=False):
         previous = core.active_sd_deformer(doc)
         previous_name = previous.GetName() if previous is not None else ""
         limit = limit_default()
+        whole = previous is None and _nothing_selected_on_active(doc)
         d, how = core.create_or_switch(doc, dtype, add=add, limit=limit)
-        if how == "add":
+        if how == "create" and whole:
+            report(tr("%s を作成しました。何も選択していなかったので、全選択と同じ（オブジェクト全体）にかけました。",
+                      "Created %s. Nothing was selected, so it was applied to the whole object (same as Select All).") % d.GetName())
+        elif how == "add":
             report(tr("%s を追加しました（%s と同じ選択範囲・向きで重ねました）。", "Added %s (stacked on %s with the same selection and direction).") % (d.GetName(), previous_name))
         elif how == "create" and core.is_bevel(d):
             # ベベルは選択範囲タグの名前で限定するので、タグを持たない子オブジェクトには効かない
@@ -169,6 +173,12 @@ def do_type(doc, dtype, add=False):
     return _run(doc, None, work)
 
 
+def _nothing_selected_on_active(doc):
+    """選択中のオブジェクトが1つのポリゴンオブジェクトで、今のモードで何も選択していなければ True。"""
+    act = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_NONE)
+    return len(act) == 1 and act[0].CheckType(c4d.Opolygon) and core.nothing_selected(doc, act[0])
+
+
 def do_reorient(doc, func, label):
     leave_pick_mode(doc)
     return _run(doc, label, lambda: func(doc, core.edit_target(doc)))
@@ -183,9 +193,13 @@ def do_recapture(doc):
             target = core.edit_target(doc)
         except core.SDError:
             raise core.SDError(tr("選択を取り直すデフォーマーを選んでください（メッシュで選択し直したあと、オブジェクトマネージャーでデフォーマーをクリック）。", "Select the deformer to update (reselect on the mesh, then click the deformer in the Object Manager)."))
+        mesh = target.GetUp()
+        whole = mesh is not None and mesh.CheckType(c4d.Opolygon) and core.nothing_selected(doc, mesh)
         d, tag = core.recapture_selection(doc, target)
         shared = [x for x in core.sd_deformers_under(d.GetUp()) if x != d and core.get_selection_tag(x) == tag]
         note = tr("（同じタグを使う %d 個も合わせ直しました）", " (also refitted %d deformer(s) sharing the tag)") % len(shared) if shared else ""
+        if whole:
+            note += tr("（何も選択していなかったので、全選択と同じくオブジェクト全体にしました）", " (nothing was selected, so the whole object was used, same as Select All)")
         report(tr("%s の選択範囲を取り直しました（タグ「%s」）%s。向きと起点は自動判定し直したので、違うときは「起点と方向」のボタンで直せます。", "Updated the selection of %s (tag \"%s\")%s. The direction and the anchor were detected again; fix them with the Anchor & Direction buttons if needed.")
                % (d.GetName(), tag.GetName(), note))
         return d
