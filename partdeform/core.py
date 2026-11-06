@@ -21,7 +21,7 @@ import c4d
 from .i18n import tr
 
 # ---------------------------------------------------------------------------
-# プラグインID（Maxon で登録した正式なID。* は取得待ちでテスト用の番号のまま）
+# プラグインID（すべて Maxon で登録した正式なID。右のコメントは登録時のラベル）
 # ---------------------------------------------------------------------------
 ID_PANEL = 1073413  # PartDeform（本体。パネルを開くコマンド）
 ID_CMD_BEND = 1073415  # PartDeformBend
@@ -30,7 +30,7 @@ ID_CMD_TAPER = 1073417  # PartDeformTaper
 ID_CMD_TWIST = 1073418  # PartDeformTwist
 ID_CMD_BULGE = 1073419  # PartDeformBulge
 ID_CMD_BEVEL = 1073420  # PartDeformBevel
-ID_TOOL_PICK = 1000009  # * 起点クリックのツール（メニューには出さない）
+ID_TOOL_PICK = 1073421  # PartDeformAnchor（起点クリックのツール。メニューには出さない）
 # 印を入れる BaseContainer のキー。登録済みのIDなら他のプラグインと重ならないので、本体のIDを使う
 ID_MARKER = ID_PANEL
 # 試作版（テスト用ID）で作ったシーンの印のキー。読むときだけ見る（自分の印の形のときだけ印とみなす）
