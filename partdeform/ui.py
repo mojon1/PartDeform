@@ -65,8 +65,8 @@ ORIENT_BUTTONS = (
      tr("主軸まわりに 90° 回す（曲げ・せん断の方向が変わる）",
         "Rotate 90° around the main axis (changes the bend / shear direction)")),
     (G_REFIT, ICON_REFIT, tr("フィット", "Fit"),
-     tr("今の向きのまま、選択範囲タグに箱を合わせ直す（再フィット）",
-        "Refit the box to the selection tag, keeping the current direction")),
+     tr("今の向きのまま、選択範囲タグ（全体用はオブジェクトの今の形）に箱を合わせ直す（再フィット）",
+        "Refit the box to the selection tag (for a whole-object deformer, to the object's current shape), keeping the current direction")),
 )
 
 # 起点クリックツールを抜けたあとに戻すツール
@@ -140,11 +140,10 @@ def do_type(doc, dtype, add=False):
         previous = core.active_sd_deformer(doc)
         previous_name = previous.GetName() if previous is not None else ""
         limit = limit_default()
-        whole = previous is None and _nothing_selected_on_active(doc)
+        reason = _whole_reason_on_active(doc) if previous is None else None
         d, how = core.create_or_switch(doc, dtype, add=add, limit=limit)
-        if how == "create" and whole:
-            report(tr("%s を作成しました。何も選択していなかったので、全選択と同じ（オブジェクト全体）にかけました。",
-                      "Created %s. Nothing was selected, so it was applied to the whole object (same as Select All).") % d.GetName())
+        if how == "create" and core.is_whole(d):
+            report(_whole_created_message(d, reason))
         elif how == "add":
             report(tr("%s を追加しました（%s と同じ選択範囲・向きで重ねました）。", "Added %s (stacked on %s with the same selection and direction).") % (d.GetName(), previous_name))
         elif how == "create" and core.is_bevel(d):
@@ -173,10 +172,38 @@ def do_type(doc, dtype, add=False):
     return _run(doc, None, work)
 
 
-def _nothing_selected_on_active(doc):
-    """選択中のオブジェクトが1つのポリゴンオブジェクトで、今のモードで何も選択していなければ True。"""
+def _whole_reason_on_active(doc):
+    """選択中のオブジェクト1つに作るとき、全体用になる理由（core.whole_reason）。決まらなければ None。"""
     act = doc.GetActiveObjects(c4d.GETACTIVEOBJECTFLAGS_NONE)
-    return len(act) == 1 and act[0].CheckType(c4d.Opolygon) and core.nothing_selected(doc, act[0])
+    if len(act) != 1 or act[0].GetInfo() & c4d.OBJECT_MODIFIER:
+        return None
+    return core.whole_reason(doc, act[0])
+
+
+def _whole_note(reason, obj_name):
+    """全体用になった理由（作成・選択の取り直しのメッセージに付ける）。"""
+    if reason == "not_mesh":
+        return tr("「%s」はメッシュになっていないので、オブジェクト全体にかけました。選択を取り直す・選択範囲に限定・フリーズは、"
+                  "C キーで編集可能にすると使えます。",
+                  "\"%s\" is not a mesh, so it works on the whole object. Update Selection, Limit to Selection and Freeze "
+                  "become available once you make it editable with C.") % obj_name
+    if reason == "mode":
+        return tr("ポイント・エッジ・ポリゴンのモードではないので、オブジェクト全体にかけました。一部だけにかけるときは、そのモードで選択してください。",
+                  "Not in Points, Edges or Polygons mode, so it works on the whole object. To work on a part, select it in one of those modes.")
+    return tr("何も選択していなかったので、オブジェクト全体にかけました。",
+              "Nothing was selected, so it works on the whole object.")
+
+
+def _whole_created_message(d, reason):
+    parent = d.GetUp()
+    message = tr("%s を作成しました。", "Created %s. ") % d.GetName() + _whole_note(reason, parent.GetName() if parent else "")
+    if parent is not None and core.shape_children(parent):
+        message += tr("子オブジェクトも一緒に変形するので、箱は子も含めた大きさに合わせました。",
+                      " Child objects are deformed too, so the box covers them as well.")
+    if core.is_bevel(d):
+        message += tr("角度が 40°以上の角だけ丸めます（属性マネージャーの「角度しきい値」で変えられます）。",
+                      " Only corners of 40° or more are rounded (change it with Angle Threshold in the Attribute Manager).")
+    return message
 
 
 def do_reorient(doc, func, label):
@@ -194,12 +221,16 @@ def do_recapture(doc):
         except core.SDError:
             raise core.SDError(tr("選択を取り直すデフォーマーを選んでください（メッシュで選択し直したあと、オブジェクトマネージャーでデフォーマーをクリック）。", "Select the deformer to update (reselect on the mesh, then click the deformer in the Object Manager)."))
         mesh = target.GetUp()
-        whole = mesh is not None and mesh.CheckType(c4d.Opolygon) and core.nothing_selected(doc, mesh)
-        d, tag = core.recapture_selection(doc, target)
+        reason = core.whole_reason(doc, mesh) if mesh is not None else None
+        d, tag = core.recapture_selection(doc, target, limit_default())
+        if tag is None:
+            report(tr("%s をオブジェクト全体用にしました。", "Made %s work on the whole object. ") % d.GetName()
+                   + _whole_note(reason, mesh.GetName())
+                   + tr("向きと起点は自動判定し直したので、違うときは「起点と方向」のボタンで直せます。",
+                        " The direction and the anchor were detected again; fix them with the Anchor & Direction buttons if needed."))
+            return d
         shared = [x for x in core.sd_deformers_under(d.GetUp()) if x != d and core.get_selection_tag(x) == tag]
         note = tr("（同じタグを使う %d 個も合わせ直しました）", " (also refitted %d deformer(s) sharing the tag)") % len(shared) if shared else ""
-        if whole:
-            note += tr("（何も選択していなかったので、全選択と同じくオブジェクト全体にしました）", " (nothing was selected, so the whole object was used, same as Select All)")
         report(tr("%s の選択範囲を取り直しました（タグ「%s」）%s。向きと起点は自動判定し直したので、違うときは「起点と方向」のボタンで直せます。", "Updated the selection of %s (tag \"%s\")%s. The direction and the anchor were detected again; fix them with the Anchor & Direction buttons if needed.")
                % (d.GetName(), tag.GetName(), note))
         return d
@@ -213,7 +244,17 @@ def do_freeze(doc):
     def work():
         targets = core.freeze_targets(doc)
         meshes = core.freeze(doc, targets)
-        report(tr("%d 個のデフォーマーをフリーズしました（%s）。", "Froze %d deformer(s) (%s).") % (len(targets), tr("、", ", ").join(m.GetName() for m in meshes)))
+        message = tr("%d 個のデフォーマーをフリーズしました（%s）。", "Froze %d deformer(s) (%s).") % (len(targets), tr("、", ", ").join(m.GetName() for m in meshes))
+        children = [c for m in meshes for c in core.affected_children(m)]
+        if children:
+            # フリーズで焼き込むのはメッシュの点だけ。デフォーマーを消すので、一緒に変形していた子は元の形に戻る
+            names = tr("、", ", ").join(tr("「%s」", '"%s"') % c.GetName() for c in children[:3])
+            if len(children) > 3:
+                names += tr("ほか", " and others")
+            message += tr("子オブジェクト %s の変形は焼き込まれず、元の形に戻りました。", " The child object(s) %s were not baked and are back to their original shape.") % names
+            report(message, error=True)
+        else:
+            report(message)
         return meshes
 
     return _run(doc, None, work)
@@ -582,8 +623,10 @@ class PartDeformPanel(gui.GeDialog):
         ベベルは名前で限定するので常にオン（切り替えられない）。"""
         target = _target_or_none(doc) if doc is not None else None
         state = core.selection_limit(target) if target is not None else None
-        if core.is_bevel(target):
+        if core.is_bevel(target) and not core.is_whole(target):
             value, enabled = True, False
+        elif target is not None and core.is_whole(target):
+            value, enabled = False, False  # 全体用は限定する選択範囲が無い
         elif state is None:
             value, enabled = limit_default(), True
         else:
@@ -689,7 +732,11 @@ class PartDeformPanel(gui.GeDialog):
         elif cid == G_AUTO:
             do_reorient(doc, core.reset_auto, tr("向きを自動判定に戻しました。", "Reset the direction to automatic."))
         elif cid == G_REFIT:
-            do_reorient(doc, core.refit, tr("選択範囲に合わせ直しました。", "Refitted to the selection."))
+            target = _target_or_none(doc)
+            if target is not None and core.is_whole(target):
+                do_reorient(doc, core.refit, tr("オブジェクト全体の今の形に合わせ直しました。", "Refitted to the current shape of the whole object."))
+            else:
+                do_reorient(doc, core.refit, tr("選択範囲に合わせ直しました。", "Refitted to the selection."))
         elif cid == G_FREEZE:
             do_freeze(doc)
         elif cid == G_RECAPTURE:

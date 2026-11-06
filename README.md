@@ -54,7 +54,7 @@ You can assign the commands to shortcuts or palettes in the Command Manager.
 ## Usage
 
 1. On an editable polygon object, select polygons, points or edges.
-   With nothing selected (in Points, Edges or Polygons mode), the whole object is used, the same as Select All.
+   To deform the whole object, select nothing, or use Model mode, or select an object that is not a mesh (see [Whole object](#whole-object)).
 2. Press a type button in the panel (Bend, Shear, Taper, Twist, Bulge, Bevel).
    - A deformer fitted to the selection is added, and only the selected part is deformed.
    - It starts with a small amount so the direction is easy to see (Bend / Twist 45°, Taper / Bulge 30%, Shear offsets the tip by about 20% of the length).
@@ -73,6 +73,19 @@ You can assign the commands to shortcuts or palettes in the Command Manager.
 
 - To change the affected area later, reselect on the mesh, click the deformer in the Object Manager, and press **Update Selection**.
 
+## Whole object
+
+The deformer is applied to the whole object when nothing is selected, in Model mode, or when the selected object is not an editable mesh
+(a primitive, a generator such as Subdivision Surface, Extrude or Cloner, or a Null that groups objects).
+
+- No selection tag is made; it works like a standard deformer placed under the object. The name shows **[Whole]**.
+- The box fits the current shape, including child objects (they are deformed too). It is aligned to the object's axes:
+  the longest side becomes the main axis with the anchor at its minus end, and the bend goes toward the thinnest side.
+- **Update Selection** switches it: select a part on the mesh to make it work on that part, or select nothing to make it work on the whole again.
+- **Fit** refits the box to the object's current shape (for example after changing a primitive's size).
+- Bevel on the whole object rounds only corners of 40° or more (Angle Threshold in the Attribute Manager).
+- On an object that is not a mesh, Update Selection, Limit to Selection and Freeze become available once you make it editable with C.
+
 ## Panel
 
 | Item | What it does |
@@ -86,9 +99,9 @@ You can assign the commands to shortcuts or palettes in the Command Manager.
 | Auto | Reset the direction and the anchor to automatic |
 | Axis | Switch the main (bend / twist) axis to another axis of the box |
 | Rot 90° | Rotate 90° around the main axis (changes the bend / shear direction) |
-| Fit | Refit the box to the selection tag, keeping the direction (after editing the mesh or the tag) |
+| Fit | Refit the box to the selection tag, keeping the direction (after editing the mesh or the tag). For a whole-object deformer, refit to the object's current shape |
 | Update Selection | Replace the selection tag with the mesh's current selection and detect the direction and anchor again (like changing the sub-object selection below a modifier in 3ds Max) |
-| Freeze | Bake the deformation into the polygons and remove the deformer and the selection tag created by PartDeform. Tags, materials, UVs and hierarchy stay. One undo step |
+| Freeze | Bake the deformation into the polygons and remove the deformer and the selection tag created by PartDeform. Tags, materials, UVs and hierarchy stay. One undo step. Only the mesh itself is baked, so child objects that were deformed together go back to their original shape (the message tells you) |
 | Deformed Editing | Toggles the viewport option "Deformed Editing" for the active view (the same setting as in the view menu) |
 
 Like the Attribute Manager, the sliders update the viewport while dragging, and a whole drag is one undo step.
@@ -100,7 +113,7 @@ Messages are shown in the Cinema 4D status bar and the console.
 - **Bend direction**: toward the surface normal for a surface selection; the thinner direction of the cross-section for protrusions.
 - **Follows the edge flow**: the in-plane direction and the rotation around the main axis follow the edges of the selected polygons, so the box lines up with the edges even on slanted faces or square-like selections.
 - When the border surrounds the selection (for example, only the middle of a face is selected), the direction is taken from the shape.
-- With the whole object (nothing selected), the direction is taken from the shape, and the anchor is at the minus end of the object's axis (the bottom for a tall object), like a standard deformer.
+- For the whole object, the box is aligned to the object's axes instead (see [Whole object](#whole-object)).
 
 ## Bevel
 

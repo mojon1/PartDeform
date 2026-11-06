@@ -323,9 +323,46 @@ def test_bumpy_patch_shear(doc):
     check("BumpyPatch: 起点の辺は動かない", root and max(root) < 1e-3, "%.4f" % max(root) if root else "")
 
 
-def test_nothing_selected(doc):
-    """何も選択していなければ全選択と同じ: タグは全要素、箱はオブジェクト全体、起点は軸のマイナス側。メッシュの選択は変えない。"""
-    print("--- NothingSelected ---")
+def _pd_tags(obj):
+    """プラグインが作った選択範囲タグ。"""
+    return [t for t in obj.GetTags() if t.GetType() in (c4d.Tpolygonselection, c4d.Tpointselection, c4d.Tedgeselection)
+            and core.is_marked(t, core.KIND_TAG)]
+
+
+def _is_plain_whole(d):
+    """全体用で、選択範囲タグもフィールドの変数タグレイヤーも持たない。"""
+    return core.is_whole(d) and core.get_selection_tag(d) is None and not core.weight_layer_targets(d)
+
+
+def _whole_points(doc, obj):
+    """オブジェクト（ジェネレーターでも）の変形後の点（ワールド座標）。"""
+    doc.ExecutePasses(None, True, True, True, c4d.BUILDFLAGS_NONE)
+    out = []
+
+    def visit(op):
+        dc = op.GetDeformCache()
+        if dc is not None:
+            visit(dc)
+        else:
+            cache = op.GetCache()
+            if cache is not None:
+                visit(cache)
+            elif op.IsInstanceOf(c4d.Opoint):
+                out.extend(op.GetMg() * p for p in op.GetAllPoints())
+        child = op.GetDown()
+        while child:
+            if not (child.GetInfo() & c4d.OBJECT_MODIFIER):
+                visit(child)
+            child = child.GetNext()
+
+    visit(obj)
+    return out
+
+
+def test_whole_object(doc):
+    """全体用: 何も選択していない・モデルモード・メッシュになっていないオブジェクトでは、タグなしで全体にかける。"""
+    print("--- WholeObject ---")
+    # 1) ポリゴンで何も選択していない → 全体用（タグもフィールドのレイヤーも作らない）
     cyl = c4d.BaseObject(c4d.Ocylinder)
     cyl[c4d.PRIM_CYLINDER_RADIUS] = 30
     cyl[c4d.PRIM_CYLINDER_HEIGHT] = 300
@@ -337,27 +374,71 @@ def test_nothing_selected(doc):
     doc.SetActiveObject(cyl, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Mpolygons)
     cyl.GetPolygonS().DeselectAll()
-    check("NothingSelected: 何も選んでいないと判定", core.nothing_selected(doc, cyl))
+    check("Whole: 何も選んでいないと全体用になると判定", core.whole_reason(doc, cyl) == "empty")
     before = cyl.GetAllPoints()
     d = ui.do_type(doc, c4d.Obend)
-    check("NothingSelected: ポリゴン: 屈曲を作成", d is not None and d.GetType() == c4d.Obend)
+    check("Whole: 何も選択なし: 屈曲を作成", d is not None and d.GetType() == c4d.Obend)
     if d is None:
         return
-    tag = core.get_selection_tag(d)
-    n_poly = cyl.GetPolygonCount()
-    check("NothingSelected: ポリゴン: タグは全ポリゴン", tag is not None and tag.GetType() == c4d.Tpolygonselection
-          and tag.GetBaseSelect().GetCount() == n_poly, "%s / %d" % (tag.GetBaseSelect().GetCount() if tag else None, n_poly))
-    check("NothingSelected: メッシュの選択は変えない", cyl.GetPolygonS().GetCount() == 0)
+    check("Whole: タグもフィールドのレイヤーも作らない", _is_plain_whole(d) and not _pd_tags(cyl))
+    check("Whole: 名前は［全体］", d.GetName() == core._deformer_name(c4d.Obend, core.WHOLE_LABEL), d.GetName())
     m = d.GetMl()
     size = d[c4d.DEFORMOBJECT_SIZE]
-    check("NothingSelected: 主軸は円柱の軸（+Y）で起点は下", m.v2.y > 0.9999, str(m.v2))
-    check("NothingSelected: 箱はオブジェクト全体（高さ 300）", abs(size.y - 300) < 1e-3, str(size))
+    check("Whole: 主軸は円柱の軸（+Y）で起点は下", m.v2.y > 0.9999, str(m.v2))
+    check("Whole: 箱はオブジェクト全体（高さ 300）", abs(size.y - 300) < 1e-3, str(size))
     pts = deformed_points(doc, cyl)
     bottom = max((pts[i] - p).GetLength() for i, p in enumerate(before) if p.y < -149.9)
     top = max((pts[i] - p).GetLength() for i, p in enumerate(before) if p.y > 149.9)
-    check("NothingSelected: 下端は動かず上端が曲がる", bottom < 1e-3 and top > 10, "下 %.4f / 上 %.2f" % (bottom, top))
+    check("Whole: 下端は動かず上端が曲がる", bottom < 1e-3 and top > 10, "下 %.4f / 上 %.2f" % (bottom, top))
+    check("Whole: 選択範囲に限定は無し", core.selection_limit(d) is None)
+    try:
+        core.set_selection_limit(doc, d, True)
+        check("Whole: 選択範囲に限定の切り替えはエラーで案内", False)
+    except core.SDError:
+        check("Whole: 選択範囲に限定の切り替えはエラーで案内", True)
 
-    # 寝かせた平面: 形から主軸、起点はオブジェクトの軸のマイナス側（-X）
+    # 種類の切り替え・重ねても全体用のまま、向きもそのまま
+    halt()
+    doc.SetActiveObject(d, c4d.SELECTION_NEW)
+    t = core.switch_type(doc, d, c4d.Otaper)
+    check("Whole: 切り替えても全体用", t.GetType() == c4d.Otaper and _is_plain_whole(t) and (t.GetMl().v2 - m.v2).GetLength() < 1e-6
+          and t.GetName() == core._deformer_name(c4d.Otaper, core.WHOLE_LABEL), t.GetName())
+    s = core.add_stacked(doc, t, c4d.Otwist)
+    check("Whole: 重ねても全体用", _is_plain_whole(s) and len(core.sd_deformers_under(cyl)) == 2)
+
+    # 選択を取り直す: 一部を選ぶと一部用（タグ付き）に、何も選ばずに取り直すと全体用に戻る（タグは消える）
+    halt()
+    doc.SetActiveObject(cyl, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Mpolygons)
+    select_polys(cyl, lambda c: c.y > 100)
+    want = cyl.GetPolygonS().GetCount()
+    halt()
+    doc.SetActiveObject(t, c4d.SELECTION_NEW)
+    t, tag = core.recapture_selection(doc, t)
+    check("Whole: 一部を選んで取り直すと一部用に", tag is not None and not core.is_whole(t) and tag.GetBaseSelect().GetCount() == want
+          and tag in core.weight_layer_targets(t, doc) and t.GetName() == core._deformer_name(c4d.Otaper, tag.GetName()),
+          "%s / %d" % (tag.GetBaseSelect().GetCount() if tag else None, want))
+    check("Whole: 一部用の箱は選んだ範囲", t[c4d.DEFORMOBJECT_SIZE].y < 100, str(t[c4d.DEFORMOBJECT_SIZE]))
+    halt()
+    cyl.GetPolygonS().DeselectAll()
+    t, tag = core.recapture_selection(doc, t)
+    check("Whole: 何も選ばずに取り直すと全体用に戻る", tag is None and _is_plain_whole(t) and not _pd_tags(cyl)
+          and abs(t[c4d.DEFORMOBJECT_SIZE].y - 300) < 1e-3 and t.GetName() == core._deformer_name(c4d.Otaper, core.WHOLE_LABEL),
+          "%s %s" % (t.GetName(), t[c4d.DEFORMOBJECT_SIZE]))
+    c4d.StopAllThreads()
+    doc.DoUndo()
+    t = [x for x in core.sd_deformers_under(cyl) if x.GetType() == c4d.Otaper][0]
+    check("Whole: 全体用に戻すのもアンドゥ1回", not core.is_whole(t) and core.get_selection_tag(t) is not None and len(_pd_tags(cyl)) == 1)
+
+    # フリーズ（ポリゴン）: 全体用の変形も焼き込める
+    halt()
+    doc.SetActiveObject(cyl, c4d.SELECTION_NEW)
+    expected = deformed_points(doc, cyl)
+    core.freeze(doc, core.freeze_targets(doc))
+    check("Whole: フリーズで焼き込み、デフォーマーとタグが消える", not core.sd_deformers_under(cyl) and not _pd_tags(cyl)
+          and max((cyl.GetPoint(i) - p).GetLength() for i, p in enumerate(expected)) < 1e-3)
+
+    # 2) モデルモード（ポリゴンオブジェクト）→ 全体用。平面は長い方（+X）が主軸、起点は -X
     plane = c4d.BaseObject(c4d.Oplane)
     plane[c4d.PRIM_PLANE_WIDTH] = 400
     plane[c4d.PRIM_PLANE_HEIGHT] = 200
@@ -366,47 +447,151 @@ def test_nothing_selected(doc):
     plane.SetRelPos(c4d.Vector(1500, 0, 600))
     halt()
     doc.SetActiveObject(plane, c4d.SELECTION_NEW)
-    doc.SetMode(c4d.Mpoints)
-    plane.GetPointS().DeselectAll()
-    d, how = core.create_or_switch(doc, c4d.Oshear)
-    tag = core.get_selection_tag(d)
-    check("NothingSelected: ポイント: タグは全ポイント", tag.GetType() == c4d.Tpointselection
-          and tag.GetBaseSelect().GetCount() == plane.GetPointCount())
-    check("NothingSelected: 平面の主軸は長い方（+X）で起点は -X", d.GetMl().v2.x > 0.9999, str(d.GetMl().v2))
-
-    # エッジ: ベベルは全エッジのエッジ選択タグ
+    select_polys(plane, lambda c: c.x > 0)  # 選択が残っていても、モデルモードなら全体
     halt()
-    doc.SetActiveObject(plane, c4d.SELECTION_NEW)
-    doc.SetMode(c4d.Medges)
-    plane.GetEdgeS().DeselectAll()
-    d, how = core.create_or_switch(doc, c4d.Obevel)
-    tag = core.get_selection_tag(d)
-    check("NothingSelected: エッジ: ベベルのタグは全エッジ", tag is not None and tag.GetType() == c4d.Tedgeselection
-          and sorted(core._edge_ids_from(tag.GetBaseSelect(), plane)) == sorted(core._all_edge_ids(plane)))
-
-    # 選択を取り直す: 一部を選んで作ったあと、選択を外して取り直すと全体になる
-    halt()
-    doc.SetActiveObject(cyl, c4d.SELECTION_NEW)
-    doc.SetMode(c4d.Mpolygons)
-    select_polys(cyl, lambda c: c.y > 100)
-    d, how = core.create_or_switch(doc, c4d.Otaper)
-    part = core.get_selection_tag(d).GetBaseSelect().GetCount()
-    halt()
-    cyl.GetPolygonS().DeselectAll()
-    d, tag = core.recapture_selection(doc, d)
-    check("NothingSelected: 取り直し: 選択を外すと全体", part < n_poly and tag.GetBaseSelect().GetCount() == n_poly,
-          "%d -> %d / %d" % (part, tag.GetBaseSelect().GetCount(), n_poly))
-
-    # モデルモードでは今までどおり「モードで選択してください」
-    halt()
-    doc.SetActiveObject(cyl, c4d.SELECTION_NEW)
     doc.SetMode(c4d.Mmodel)
+    check("Whole: モデルモードは全体用になると判定", core.whole_reason(doc, plane) == "mode")
+    d, how = core.create_or_switch(doc, c4d.Oshear)
+    size = d[c4d.DEFORMOBJECT_SIZE]
+    check("Whole: モデルモード: 全体用", how == "create" and _is_plain_whole(d) and not _pd_tags(plane))
+    check("Whole: 平面の主軸は長い方（+X）で起点は -X、箱は 400", d.GetMl().v2.x > 0.9999 and abs(size.y - 400) < 1e-3,
+          "%s %s" % (d.GetMl().v2, size))
+    halt()
+    doc.SetActiveObject(d, c4d.SELECTION_NEW)
+    d2, tag = core.recapture_selection(doc, d)
+    check("Whole: モデルモードで取り直すと全体用のまま", tag is None and _is_plain_whole(d2))
+
+    # 3) ベベル（全体用）: 角度 40°以上の角だけ。フリーズ後の形＝デフォーマーの形（角の選び方が同じ）
+    for name, make, sub in (("WholeBevelBox", c4d.Ocube, None), ("WholeBevelPlane", c4d.Oplane, (4, 4)),
+                            ("WholeBevelTube", c4d.Ocylinder, None)):
+        prim = c4d.BaseObject(make)
+        if sub:
+            prim[c4d.PRIM_PLANE_SUBW], prim[c4d.PRIM_PLANE_SUBH] = sub
+        prim.SetName(name)
+        obj = make_editable(doc, prim)
+        obj.SetRelPos(c4d.Vector(2200, 0, 0))
+        n_before = obj.GetPointCount()
+        halt()
+        doc.SetActiveObject(obj, c4d.SELECTION_NEW)
+        doc.SetMode(c4d.Medges)
+        obj.GetEdgeS().DeselectAll()
+        b, _how = core.create_or_switch(doc, c4d.Obevel)
+        check("Whole: %s: ベベルは全体用で角だけ" % name, core.is_whole(b) and core.get_selection_tag(b) is None and not _pd_tags(obj)
+              and b[core.BEVEL_SELECTION] == "" and b[c4d.O_BEVEL_MODE_SELECTION_ANGLE_USE]
+              and abs(b[c4d.O_BEVEL_MODE_SELECTION_ANGLE_VAL] - math.radians(40)) < 1e-6)
+        doc.ExecutePasses(None, True, True, True, c4d.BUILDFLAGS_NONE)
+        cache = obj.GetDeformCache()
+        expected = sorted_points(cache.GetAllPoints()) if cache else sorted_points(obj.GetAllPoints())
+        expected_polys = cache.GetPolygonCount() if cache else obj.GetPolygonCount()
+        halt()
+        doc.SetActiveObject(obj, c4d.SELECTION_NEW)
+        core.freeze(doc, core.freeze_targets(doc))
+        obj = doc.SearchObject(name)
+        check("Whole: %s: フリーズ後の形＝デフォーマーの形" % name, sorted_points(obj.GetAllPoints()) == expected
+              and obj.GetPolygonCount() == expected_polys, "%d → %d pts（デフォーマー %d）" % (n_before, obj.GetPointCount(), len(expected)))
+        halt()
+        obj.Remove()  # 同じ位置に次を作るので片付ける
+
+    # 4) メッシュになっていないオブジェクト: プリミティブ・ヌルのグループ・サブディビジョンサーフェイス
+    halt()
+    doc.SetMode(c4d.Mpolygons)  # モードに関係なく全体用
+    prim = c4d.BaseObject(c4d.Ocube)
+    prim[c4d.PRIM_CUBE_LEN] = c4d.Vector(100, 300, 100)
+    prim[c4d.PRIM_CUBE_SUBY] = 6
+    prim.SetName("WholePrim")
+    doc.InsertObject(prim)
+    prim.SetRelPos(c4d.Vector(2600, 0, 0))
+    doc.SetActiveObject(prim, c4d.SELECTION_NEW)
+    check("Whole: プリミティブは全体用になると判定", core.whole_reason(doc, prim) == "not_mesh")
+    before = _whole_points(doc, prim)
+    d = ui.do_type(doc, c4d.Obend)
+    check("Whole: プリミティブ: 子に全体用を作る", d is not None and d.GetUp() == prim and _is_plain_whole(d))
+    if d is not None:
+        size = d[c4d.DEFORMOBJECT_SIZE]
+        check("Whole: プリミティブ: 箱は形に合う（高さ 300、軸は +Y、中心）", abs(size.y - 300) < 1e-3 and d.GetMl().v2.y > 0.9999
+              and d.GetMl().off.GetLength() < 1e-3, "%s %s" % (size, d.GetMl().off))
+        after = _whole_points(doc, prim)
+        top = max((after[i] - p).GetLength() for i, p in enumerate(before) if p.y > 149.9)
+        bottom = max((after[i] - p).GetLength() for i, p in enumerate(before) if p.y < -149.9)
+        check("Whole: プリミティブ: 下は動かず上が曲がる", len(after) == len(before) and bottom < 1e-3 and top > 10,
+              "下 %.4f / 上 %.2f" % (bottom, top))
+        halt()
+        doc.SetActiveObject(d, c4d.SELECTION_NEW)
+        for label, func in (("選択の取り直し", lambda: core.recapture_selection(doc, d)),
+                            ("フリーズ", lambda: core.freeze(doc, [d])),
+                            ("選択範囲に限定", lambda: core.set_selection_limit(doc, d, False))):
+            try:
+                func()
+                check("Whole: プリミティブ: %sはエラーで案内" % label, False)
+            except core.SDError:
+                check("Whole: プリミティブ: %sはエラーで案内" % label, True)
+        b = core.switch_type(doc, d, c4d.Obevel)
+        check("Whole: プリミティブ: ベベルにもできる（角が丸まる）", core.is_whole(b) and len(_whole_points(doc, prim)) > len(before))
+        d = core.switch_type(doc, b, c4d.Otaper)
+        halt()
+        prim[c4d.PRIM_CUBE_LEN] = c4d.Vector(100, 500, 100)
+        core.refit(doc, d)
+        check("Whole: プリミティブ: 大きさを変えてフィットし直せる", abs(d[c4d.DEFORMOBJECT_SIZE].y - 500) < 1e-3,
+              str(d[c4d.DEFORMOBJECT_SIZE]))
+
+    null = c4d.BaseObject(c4d.Onull)
+    null.SetName("WholeGroup")
+    halt()
+    doc.InsertObject(null)
+    null.SetRelPos(c4d.Vector(2600, 0, 800))
+    for x in (-200, 200):
+        c = c4d.BaseObject(c4d.Ocube)
+        c[c4d.PRIM_CUBE_LEN] = c4d.Vector(100)
+        doc.InsertObject(c, parent=null)
+        c.SetRelPos(c4d.Vector(x, 0, 0))
+    doc.SetActiveObject(null, c4d.SELECTION_NEW)
+    d = ui.do_type(doc, c4d.Obend)
+    size = d[c4d.DEFORMOBJECT_SIZE] if d is not None else c4d.Vector()
+    check("Whole: ヌルのグループ: 子を全部含む箱（長さ 500、主軸 X）", d is not None and _is_plain_whole(d)
+          and abs(size.y - 500) < 1e-3 and abs(abs(d.GetMl().v2.x) - 1) < 1e-6, "%s %s" % (size, d.GetMl().v2 if d else None))
+
+    sds = c4d.BaseObject(1007455)  # サブディビジョンサーフェイス
+    sds.SetName("WholeSDS")
+    halt()
+    doc.InsertObject(sds)
+    sds.SetRelPos(c4d.Vector(2600, 0, -800))
+    c = c4d.BaseObject(c4d.Ocube)
+    c[c4d.PRIM_CUBE_LEN] = c4d.Vector(200)
+    doc.InsertObject(c, parent=sds)
+    doc.SetActiveObject(sds, c4d.SELECTION_NEW)
+    d = ui.do_type(doc, c4d.Obulge)
+    size = d[c4d.DEFORMOBJECT_SIZE] if d is not None else c4d.Vector()
+    check("Whole: サブディビジョンサーフェイス: 丸めた形に合う（200 より小さい）", d is not None and _is_plain_whole(d)
+          and 100 < size.x < 199 and abs(size.x - size.y) < 1e-3, str(size))
+
+    # 5) 子オブジェクトのあるメッシュ: 子も一緒に変形するので、箱は子も含む
+    base = c4d.BaseObject(c4d.Oplane)
+    base[c4d.PRIM_PLANE_WIDTH] = base[c4d.PRIM_PLANE_HEIGHT] = 200
+    base.SetName("WholeParent")
+    base = make_editable(doc, base)
+    base.SetRelPos(c4d.Vector(3200, 0, 0))
+    child = c4d.BaseObject(c4d.Ocube)
+    child[c4d.PRIM_CUBE_LEN] = c4d.Vector(100)
+    doc.InsertObject(child, parent=base)
+    child.SetRelPos(c4d.Vector(0, 300, 0))
+    halt()
+    doc.SetActiveObject(base, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Mmodel)
+    d, _how = core.create_or_switch(doc, c4d.Obend)
+    size = d[c4d.DEFORMOBJECT_SIZE]
+    check("Whole: 子のあるメッシュ: 箱は子も含む（高さ 350）", _is_plain_whole(d) and abs(size.y - 350) < 1e-3 and d.GetMl().v2.y > 0.9999,
+          "%s %s" % (size, d.GetMl().v2))
+
+    # 6) 標準のデフォーマー（ほかを変形する側）を選んでいたら作らない
+    std = c4d.BaseObject(c4d.Obend)
+    halt()
+    doc.InsertObject(std)
+    doc.SetActiveObject(std, c4d.SELECTION_NEW)
     try:
-        core.create(doc, c4d.Obend)
-        ok = False
+        core.create(doc, c4d.Otaper)
+        check("Whole: 標準のデフォーマーを選んでいたらエラー", False)
     except core.SDError:
-        ok = True
-    check("NothingSelected: モデルモードでは作らない", ok)
+        check("Whole: 標準のデフォーマーを選んでいたらエラー", True)
     halt()
     doc.SetMode(c4d.Mpolygons)
 
@@ -1042,7 +1227,7 @@ def _run_all(doc):
     test_face_shear(doc)
     test_tilted_square_patch(doc)
     test_bumpy_patch_shear(doc)
-    test_nothing_selected(doc)
+    test_whole_object(doc)
     test_recapture(doc)
     test_add_stacked(doc)
     test_selection_limit(doc)

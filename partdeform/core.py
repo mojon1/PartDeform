@@ -11,6 +11,10 @@
   昔の「制限」タグはレガシー扱いなので使わない（旧版で作ったデフォーマーの読み取りだけ対応）。
   「選択範囲に限定」をオフにすると、このレイヤーの「有効」をオフにする（レイヤーとタグは残す）。
   フィールドが効かないので標準のデフォーマーと同じ動きになり、パイプの一部を曲げると先の部分も付いてくる。
+- 何も選んでいない・モデルモードなど・メッシュになっていないオブジェクト（プリミティブ、ジェネレーター、
+  ヌルのグループ）では「全体用」にする。選択範囲タグもフィールドのレイヤーも入れず（全選択のタグは
+  変形の結果を変えないうえ、あとで足したポリゴンが漏れる）、箱を子も含めた今の形に合わせるだけ。
+  印に MK_WHOLE を立てて、一部用と見分ける。
 - 標準デフォーマーは箱の底面（ローカル -Y）で効果0、上面で最大（膨張は両端0）。
   そこで箱の底面を選択範囲の「起点」に合わせる。
 - プラグインが作ったデフォーマー／タグには、BaseContainer の ID_MARKER に印を残す。
@@ -42,6 +46,7 @@ ID_MARKER_LEGACY = 1000010
 MK_KIND = 1
 MK_TAG = 2
 MK_VERSION = 3
+MK_WHOLE = 4  # True: オブジェクト全体にかける「全体用」（選択範囲タグもフィールドのレイヤーも持たない）
 KIND_DEFORMER = 1
 KIND_TAG = 2
 MARKER_VERSION = 1
@@ -77,6 +82,16 @@ BEVEL_TOOL_PARAMS = (1001, 1002, 1003, 1004, 1005, 1100, 1101, 1102, 1103, 1201,
                      1205, 1206, 1207, 1208, 1301, 1302, 1303, 1304, 1305, 1306, 1307)
 BEVEL_DEFAULT_RATIO = 0.03  # 作成時のオフセット（選択範囲の最大辺に対する割合）
 BEVEL_OFFSET_PROPORTIONAL = 2  # オフセットモード「比例」（オフセットが長さではなくなる）
+BEVEL_MODE_EDGES = 1  # ベベルのコンポーネントモード「エッジ」
+# 全体用のベベル: 標準のベベルデフォーマーの既定と同じく、隣の面との角度がこれ以上の角だけ丸める
+# （分割された平らな面の中のエッジまで丸めないため）
+BEVEL_WHOLE_ANGLE = math.radians(40.0)
+# 全体用のベベルをフリーズするとき、隣の面が無い外周のエッジも丸めるか。デフォーマーは「角度を使う」のとき
+# 外周を丸めない（C4D 2027 で、分割した平面が変わらないことを確認）ので、それに合わせる
+BEVEL_WHOLE_BOUNDARY = False
+
+# モード。ポイント・エッジ・ポリゴンのモードで何か選んでいれば、その部分にかける。それ以外は全体用
+COMPONENT_MODES = (c4d.Mpoints, c4d.Medges, c4d.Mpolygons)
 
 # 作成時の強さ（向きがすぐ分かるように少しだけ効かせる）。シアーは default_amount() で箱から計算する
 DEFAULT_AMOUNT = {
@@ -176,14 +191,25 @@ def is_sd_deformer(obj):
     )
 
 
-def _set_marker(node, kind, tag=None):
+def _set_marker(node, kind, tag=None, whole=False):
     bc = node.GetDataInstance()
     sub = c4d.BaseContainer()
     sub.SetInt32(MK_KIND, kind)
     sub.SetInt32(MK_VERSION, MARKER_VERSION)
     if tag is not None:
         sub.SetLink(MK_TAG, tag)
+    if whole:
+        sub.SetBool(MK_WHOLE, True)
     bc.SetContainer(ID_MARKER, sub)
+
+
+def is_whole(deformer):
+    """オブジェクト全体にかける「全体用」のデフォーマーか（選択範囲タグを持たない）。"""
+    sub = _marker(deformer)
+    return sub is not None and sub.GetBool(MK_WHOLE)
+
+
+WHOLE_LABEL = tr("全体", "Whole")  # 全体用のデフォーマーの名前の [ ] の中
 
 
 SELECTION_TAG_TYPES = (c4d.Tpolygonselection, c4d.Tpointselection)  # フィールド（箱の種類）で使えるタグ
@@ -246,9 +272,9 @@ def selection_limit(deformer):
 
     選択範囲タグを指す変数タグレイヤーが1つでも有効なら True。レイヤーが無い・すべて無効なら False
     （フィールドが効かないので、箱の中はすべて変形し、箱の外は標準のデフォーマーと同じ動きになる）。
-    ベベル（名前で限定する）や、タグが見つからないものは None（切り替えられない）。
+    ベベル（名前で限定する）、全体用、タグが見つからないものは None（切り替えられない）。
     """
-    if deformer is None or deformer.GetType() not in BOX_TYPES:
+    if deformer is None or deformer.GetType() not in BOX_TYPES or is_whole(deformer):
         return None
     doc = deformer.GetDocument()
     tag = get_selection_tag(deformer)
@@ -269,6 +295,8 @@ def set_selection_limit(doc, deformer, on, undo=True):
                          "Bevel is limited by the tag name in its Selection field, so this option does not apply."))
     if deformer is None or deformer.GetType() not in BOX_TYPES:
         raise SDError(tr("PartDeform のデフォーマーを選択してください。", "Select a PartDeform deformer."))
+    if is_whole(deformer):
+        raise SDError(_whole_no_selection_message(deformer))
     tag = get_selection_tag(deformer)
     if tag is None:
         raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % deformer.GetName())
@@ -315,7 +343,7 @@ def get_selection_tag(deformer):
     3) 旧版の制限タグに書いた名前
     """
     parent = deformer.GetUp()
-    if parent is None:
+    if parent is None or is_whole(deformer):
         return None
     doc = deformer.GetDocument()
     if deformer.GetType() == c4d.Obevel:
@@ -373,6 +401,30 @@ def _setup_bevel(bevel, tag, size_hint=None):
     bevel[BEVEL_SELECTION] = tag.GetName()
     if size_hint is not None:
         bevel[c4d.O_BEVEL_RADIUS] = max(size_hint * BEVEL_DEFAULT_RATIO, 0.01)
+
+
+def _setup_bevel_whole(bevel, size_hint=None):
+    """全体用のベベル: 「選択範囲」欄を空にして、隣の面との角度が BEVEL_WHOLE_ANGLE 以上のエッジだけ丸める。"""
+    bevel[c4d.O_BEVEL_MODE_COMPONENT_TYPE] = BEVEL_MODE_EDGES
+    bevel[c4d.O_BEVEL_MODE_SELECTION_ANGLE_USE] = True
+    bevel[c4d.O_BEVEL_MODE_SELECTION_ANGLE_VAL] = BEVEL_WHOLE_ANGLE
+    bevel[BEVEL_SELECTION] = ""
+    if size_hint is not None:
+        bevel[c4d.O_BEVEL_RADIUS] = max(size_hint * BEVEL_DEFAULT_RATIO, 0.01)
+
+
+def _whole_no_selection_message(deformer):
+    """全体用のデフォーマーでは使えない操作（選択範囲に限定など）の案内。"""
+    parent = deformer.GetUp()
+    if parent is not None and not parent.CheckType(c4d.Opolygon):
+        return tr("「%s」はオブジェクト全体にかけています。メッシュになっていない「%s」では、選択範囲で限定できません"
+                  "（C キーで編集可能にすると、一部だけにかけられます）。",
+                  "\"%s\" works on the whole object. \"%s\" is not a mesh, so it cannot be limited to a selection "
+                  "(make it editable with C to work on a part).") % (deformer.GetName(), parent.GetName())
+    return tr("「%s」はオブジェクト全体にかけているので、選択範囲での限定はありません。一部だけにかけるときは、"
+              "メッシュで選択してから「選択を取り直す」を押してください。",
+              "\"%s\" works on the whole object, so there is no selection to limit to. To work on a part, "
+              "select it on the mesh and press Update Selection.") % deformer.GetName()
 
 
 def _selection_size(info):
@@ -530,7 +582,7 @@ def _extent(points, axis):
 class SelectionInfo(object):
     """選択範囲の点・面・境界をまとめたもの（座標はオブジェクトのローカル空間）。"""
 
-    def __init__(self, obj, point_ids, poly_ids):
+    def __init__(self, obj, point_ids, poly_ids, center=None):
         self.obj = obj
         all_pts = obj.GetAllPoints()
         polys = obj.GetAllPolygons()
@@ -577,13 +629,96 @@ class SelectionInfo(object):
         self.area = area
         self.normal_cov = ncov
         self.coherence = (nsum.GetLength() / area) if area > EPS else 0.0
-        self.object_center = obj.GetMp()
+        self.object_center = center if center is not None else obj.GetMp()
+
+
+def shape_children(obj):
+    """obj の子のうち、形のあるもの（デフォーマーなど、ほかを変形するものを除く）。"""
+    return [c for c in obj.GetChildren() if not (c.GetInfo() & c4d.OBJECT_MODIFIER)]
+
+
+def _shape_points(root):
+    """root と子孫の今の形（デフォーマーの変形は含めない）を、ワールド座標の点と、通し番号のポリゴンで返す。
+
+    ジェネレーター（プリミティブ、サブディビジョンサーフェイス、クローナー等）はキャッシュの中身を使う。
+    デフォーマーを子に持つと、キャッシュのポリゴンにも「入力」の印（BIT_CONTROLOBJECT）が付くので、
+    キャッシュの中では印を見ない。本物の子は、親のジェネレーターに取り込まれている（親が子を入力にして
+    キャッシュを作り、子に印がある）ときだけ外す。
+    """
+    pts = []
+    polys = []
+
+    def add(op):
+        mg = op.GetMg()
+        base = len(pts)
+        pts.extend(mg * p for p in op.GetAllPoints())
+        if op.IsInstanceOf(c4d.Opolygon):
+            for p in op.GetAllPolygons():
+                polys.append(c4d.CPolygon(p.a + base, p.b + base, p.c + base, p.d + base))
+
+    def visit(op, in_cache):
+        cache = op.GetCache()
+        if cache is not None:
+            visit(cache, True)
+        elif op.IsInstanceOf(c4d.Opoint):
+            add(op)
+        consumes = (not in_cache) and cache is not None and bool(op.GetInfo() & c4d.OBJECT_INPUT)
+        child = op.GetDown()
+        while child:
+            if in_cache:
+                visit(child, True)
+            elif not (child.GetInfo() & c4d.OBJECT_MODIFIER) and not (consumes and child.GetBit(c4d.BIT_CONTROLOBJECT)):
+                visit(child, False)
+            child = child.GetNext()
+
+    visit(root, False)
+    return pts, polys
+
+
+def whole_info(obj, doc=None):
+    """オブジェクト全体（子オブジェクトも含めた今の形）の SelectionInfo。座標は obj のローカル空間。
+
+    デフォーマーは親だけでなく子オブジェクトもまとめて変形するので、箱は子も含めた大きさに合わせる。
+    子の無いポリゴンオブジェクトは、そのメッシュの点そのもの（点番号がメッシュと同じ）。
+    """
+    if obj.CheckType(c4d.Opolygon) and not shape_children(obj):
+        n = obj.GetPointCount()
+        if n < 2:
+            raise SDError(tr("「%s」には形がないので、大きさを決められません。", "\"%s\" has no shape, so its size cannot be found.") % obj.GetName())
+        return SelectionInfo(obj, range(n), range(obj.GetPolygonCount()))
+    doc = doc or obj.GetDocument()
+    if doc is not None:
+        # 作ったばかりのプリミティブなどはまだ中身（キャッシュ）が無いので、作らせる
+        doc.ExecutePasses(None, False, False, True, c4d.BUILDFLAGS_NONE)
+    pts, polys = _shape_points(obj)
+    if len(pts) < 2:
+        raise SDError(tr("「%s」には形がないので、大きさを決められません。", "\"%s\" has no shape, so its size cannot be found.") % obj.GetName())
+    inv = ~obj.GetMg()
+    local = [inv * p for p in pts]
+    tmp = c4d.PolygonObject(len(local), len(polys))
+    tmp.SetAllPoints(local)
+    for i, p in enumerate(polys):
+        tmp.SetPolygon(i, p)
+    lo = c4d.Vector(min(p.x for p in local), min(p.y for p in local), min(p.z for p in local))
+    hi = c4d.Vector(max(p.x for p in local), max(p.y for p in local), max(p.z for p in local))
+    return SelectionInfo(tmp, range(len(local)), range(len(polys)), center=(lo + hi) * 0.5)
+
+
+def whole_reason(doc, obj):
+    """obj に作るとき全体用になるならその理由（"not_mesh" / "mode" / "empty"）、一部にかけるなら None。"""
+    if not obj.CheckType(c4d.Opolygon):
+        return "not_mesh"
+    if doc.GetMode() not in COMPONENT_MODES:
+        return "mode"
+    if nothing_selected(doc, obj):
+        return "empty"
+    return None
 
 
 def nothing_selected(doc, obj):
     """今のモード（ポイント・エッジ・ポリゴン）で何も選択していなければ True。
 
-    そのときは全選択と同じに扱う（オブジェクト全体にかける）。ほかのモードでは False。
+    そのときは全体用（オブジェクト全体にかける）にする。ほかのモードでは False。
     """
     mode = doc.GetMode()
     if mode == c4d.Mpolygons:
@@ -598,12 +733,12 @@ def nothing_selected(doc, obj):
 def selection_from_component_mode(doc, obj):
     """今のモードと選択から (タグ種別, 点ID集合, ポリゴンID集合, 説明) を返す。
 
-    何も選択していなければ、全選択と同じ（そのモードの要素すべて）にする。
+    何も選択していないとき・ほかのモードのときは、呼ぶ側が全体用にする（whole_reason）。
     """
     mode = doc.GetMode()
-    if mode not in (c4d.Mpolygons, c4d.Mpoints, c4d.Medges):
-        raise SDError(tr("ポイント・エッジ・ポリゴンのどれかのモードで、変形したい部分を選択してください（何も選択しなければ全体にかかります）。",
-                         "Select the part to deform in Points, Edges or Polygons mode (with nothing selected, the whole object is used)."))
+    if mode not in COMPONENT_MODES:
+        raise SDError(tr("ポイント・エッジ・ポリゴンのどれかのモードで、変形したい部分を選択してください。",
+                         "Select the part to deform in Points, Edges or Polygons mode."))
     pcnt = obj.GetPointCount()
     vcnt = obj.GetPolygonCount()
     if pcnt < 2 or vcnt == 0:
@@ -611,16 +746,16 @@ def selection_from_component_mode(doc, obj):
     polys = obj.GetAllPolygons()
     if mode == c4d.Mpolygons:
         flags = obj.GetPolygonS().GetAll(vcnt)
-        poly_ids = [i for i, f in enumerate(flags) if f] or list(range(vcnt))
+        poly_ids = [i for i, f in enumerate(flags) if f]
         pts = set()
         for i in poly_ids:
             pts.update(_poly_ids(polys[i]))
         return c4d.Tpolygonselection, pts, set(poly_ids), tr("ポリゴン %d 個", "%d polygons") % len(poly_ids)
     if mode == c4d.Mpoints:
         flags = obj.GetPointS().GetAll(pcnt)
-        pts = set(i for i, f in enumerate(flags) if f) or set(range(pcnt))
+        pts = set(i for i, f in enumerate(flags) if f)
         return c4d.Tpointselection, pts, _polys_inside(polys, pts), tr("ポイント %d 個", "%d points") % len(pts)
-    edge_ids = _edge_ids_or_all(obj)
+    edge_ids = _edge_ids_from(obj.GetEdgeS(), obj)
     pts = set()
     for e in edge_ids:
         p = polys[e // 4]
@@ -681,9 +816,41 @@ def _all_edge_ids(obj):
     return out
 
 
-def _edge_ids_or_all(obj):
-    """選択中のエッジ。何も選択していなければ、すべてのエッジ（全選択と同じ）。"""
-    return _edge_ids_from(obj.GetEdgeS(), obj) or _all_edge_ids(obj)
+def _poly_normal(pts, p):
+    v = (pts[p.c] - pts[p.a]).Cross(pts[p.d] - pts[p.b])
+    ln = v.GetLength()
+    return v / ln if ln > EPS else None
+
+
+def sharp_edge_ids(obj, angle, boundary=False):
+    """隣の面との角度が angle 以上のエッジ（ポリゴン番号×4＋辺。両側のポリゴンの分とも）。
+
+    ベベルデフォーマーの「角度を使う」と同じ選び方。boundary=True なら、隣の面が無い外周のエッジも含める。
+    """
+    pts = obj.GetAllPoints()
+    polys = obj.GetAllPolygons()
+    nb = c4d.utils.Neighbor()
+    if not nb.Init(obj):
+        raise SDError(tr("「%s」のエッジを調べられませんでした。", "Could not inspect the edges of \"%s\".") % obj.GetName())
+    normals = [_poly_normal(pts, p) for p in polys]
+    limit = math.cos(angle)
+    out = []
+    for i, p in enumerate(polys):
+        for side, (a, b) in enumerate(((p.a, p.b), (p.b, p.c), (p.c, p.d), (p.d, p.a))):
+            if a == b:
+                continue
+            j = nb.GetNeighbor(a, b, i)
+            if j < 0 or j == c4d.NOTOK:
+                if boundary:
+                    out.append(i * 4 + side)
+                continue
+            n1, n2 = normals[i], normals[j]
+            if n1 is None or n2 is None:
+                continue
+            # 角度 = 2つの面の法線のなす角（平らなら 0°）
+            if n1.Dot(n2) <= limit + 1e-9:
+                out.append(i * 4 + side)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -940,6 +1107,26 @@ def auto_frame(info):
             return _align_heading(info, _orthonormal(xn, y))
     u = _major_in_plane(info.points, y)
     return _align_heading(info, _orthonormal(y.Cross(u), y))
+
+
+def whole_frame(info):
+    """全体用の向き (X, Y, Z): オブジェクトの軸にそろえ、いちばん長い軸を主軸（起点はマイナス側の端）、
+    残りのうち薄い方を曲げる向き（デフォーマーの X）にする。
+
+    標準のデフォーマーをオブジェクトの大きさに合わせて置くのと同じ考え方。形の主成分で決めると、
+    子オブジェクトを含むグループなどでは点の多い部分につられて、長い方向から外れることがあるため。
+    同じくらいの長さなら、主軸は Y → X → Z、曲げる向きは X → Z → Y の順に選ぶ。
+    """
+    pts = info.points
+    comps = [[p.x for p in pts], [p.y for p in pts], [p.z for p in pts]]
+    ext = [max(c) - min(c) for c in comps]
+    tol = max(ext) * 0.01 + EPS
+    main = next(a for a in (1, 0, 2) if ext[a] >= max(ext) - tol)
+    rest = [a for a in (0, 2, 1) if a != main]
+    thin = min(ext[a] for a in rest)
+    bend = next(a for a in rest if ext[a] <= thin + tol)
+    e = (c4d.Vector(1, 0, 0), c4d.Vector(0, 1, 0), c4d.Vector(0, 0, 1))
+    return _orthonormal(e[bend], e[main])
 
 
 def fit_box(info, axes, dtype):
@@ -1274,7 +1461,17 @@ def _mesh_of(deformer):
     return parent
 
 
+def _parent_of(deformer):
+    """全体用のデフォーマーの親（ポリゴンでなくてもよい）。"""
+    parent = deformer.GetUp()
+    if parent is None:
+        raise SDError(tr("「%s」に親のオブジェクトがありません。", "\"%s\" has no parent object.") % deformer.GetName())
+    return parent
+
+
 def _info_of(deformer):
+    if is_whole(deformer):
+        return whole_info(_parent_of(deformer))
     mesh = _mesh_of(deformer)
     tag = get_selection_tag(deformer)
     if tag is None:
@@ -1325,9 +1522,13 @@ def _configure(new, dtype, tag, info, axes, amount=None, fields=None, limit=True
     """新しいデフォーマーに選択範囲・箱・強さを入れ、ローカル行列を返す（挿入前に呼ぶ）。
 
     fields を渡さないときは、選択範囲タグのレイヤーを入れる（limit=False なら「有効」オフで）。
+    tag=None は全体用: ベベルは角だけ丸め、箱の種類はフィールドを入れない（fields を渡せばそれを入れる）。
     """
     if dtype == c4d.Obevel:
-        _setup_bevel(new, tag, _selection_size(info))
+        if tag is None:
+            _setup_bevel_whole(new, _selection_size(info))
+        else:
+            _setup_bevel(new, tag, _selection_size(info))
         if amount is not None:
             new[c4d.O_BEVEL_RADIUS] = amount
         return c4d.Matrix()
@@ -1338,20 +1539,25 @@ def _configure(new, dtype, tag, info, axes, amount=None, fields=None, limit=True
         angle = new[c4d.DEFORMOBJECT_ANGLE] if dtype in DIRECTION_ANGLE_TYPES else 0.0
         amount = default_amount(dtype, size, angle or 0.0)
     new[AMOUNT_PARAM[dtype]] = amount
-    new[c4d.FIELDS] = fields if fields is not None else make_field_list(tag, limit)
+    if fields is not None:
+        new[c4d.FIELDS] = fields
+    elif tag is not None:
+        new[c4d.FIELDS] = make_field_list(tag, limit)
     return mat
 
 
 def _axes_for(deformer, info):
-    """新しい箱の向き: 元が箱の種類ならその向き、ベベル（箱が無い）なら自動判定。"""
+    """新しい箱の向き: 元が箱の種類ならその向き、ベベル（箱が無い）なら自動判定（全体用はオブジェクトの軸）。"""
     if deformer.GetType() in BOX_TYPES:
         return _axes_of(deformer)
-    return auto_frame(info)
+    return whole_frame(info) if is_whole(deformer) else auto_frame(info)
 
 
 def create(doc, dtype, limit=True):
-    """選択中のポリゴンオブジェクトの選択範囲から、デフォーマーを作る。
+    """選択中のオブジェクトにデフォーマーを作る。
 
+    ポリゴンオブジェクトでポイント・エッジ・ポリゴンを選んでいれば、その部分用（選択範囲タグ付き）。
+    何も選んでいない・モデルモードなど・メッシュになっていないオブジェクトなら、全体用（_create_whole）。
     limit=False: 選択範囲に限定しない（フィールドのレイヤーは「有効」オフで入れる）。ベベルは常に限定。
     """
     if dtype not in DEFORMER_TYPES:
@@ -1359,10 +1565,13 @@ def create(doc, dtype, limit=True):
     _stop_threads()
     act = _active_objects(doc)
     if len(act) != 1:
-        raise SDError(tr("編集可能なポリゴンオブジェクトを1つだけ選択してください。", "Select exactly one editable polygon object."))
+        raise SDError(tr("変形したいオブジェクトを1つだけ選択してください。", "Select exactly one object to deform."))
     obj = act[0]
-    if not obj.CheckType(c4d.Opolygon):
-        raise SDError(tr("「%s」は編集可能なポリゴンオブジェクトではありません（Cキーで編集可能にしてください）。", "\"%s\" is not an editable polygon object (press C to make it editable).") % obj.GetName())
+    if obj.GetInfo() & c4d.OBJECT_MODIFIER:
+        raise SDError(tr("「%s」はほかを変形する側のオブジェクトです。変形したいオブジェクトを選択してください。",
+                         "\"%s\" deforms other objects. Select the object you want to deform.") % obj.GetName())
+    if whole_reason(doc, obj) is not None:
+        return _create_whole(doc, obj, dtype)
 
     tag_type, pts, poly_ids, _desc = selection_from_component_mode(doc, obj)
     if len(pts) < 2:
@@ -1371,7 +1580,7 @@ def create(doc, dtype, limit=True):
     if dtype == c4d.Obevel and doc.GetMode() == c4d.Medges:
         # ベベルはエッジのままで使う（箱の種類は、エッジの点をポイント選択タグにする）
         tag_type = c4d.Tedgeselection
-        edge_ids = _edge_ids_or_all(obj)
+        edge_ids = _edge_ids_from(obj.GetEdgeS(), obj)
     info = SelectionInfo(obj, pts, poly_ids)
     axes = auto_frame(info) if dtype in BOX_TYPES else None
 
@@ -1409,6 +1618,31 @@ def create(doc, dtype, limit=True):
     return d
 
 
+def _create_whole(doc, obj, dtype):
+    """全体用のデフォーマーを obj の子に作る（選択範囲タグもフィールドのレイヤーも入れない）。
+
+    箱は子オブジェクトも含めた今の形に合わせ、向きはオブジェクトの軸（いちばん長い軸が主軸）、
+    起点はその軸のマイナス側の端（whole_frame）。
+    """
+    info = whole_info(obj, doc)
+    axes = whole_frame(info) if dtype in BOX_TYPES else None
+    doc.StartUndo()
+    try:
+        d = _new_deformer(doc, dtype)
+        d.SetName(_deformer_name(dtype, WHOLE_LABEL))
+        mat = _configure(d, dtype, None, info, axes)
+        _set_marker(d, KIND_DEFORMER, whole=True)
+        d.InsertUnderLast(obj)
+        d.SetMl(mat)
+        doc.AddUndo(c4d.UNDOTYPE_NEWOBJ, d)
+        doc.AddUndo(c4d.UNDOTYPE_BITS, obj)
+        doc.SetActiveObject(d, c4d.SELECTION_NEW)
+    finally:
+        doc.EndUndo()
+    c4d.EventAdd()
+    return d
+
+
 def switch_type(doc, deformer, dtype, limit=True):
     """プラグイン製デフォーマーを別の種類に入れ替える（箱・向き・タグはそのまま）。
 
@@ -1421,19 +1655,29 @@ def switch_type(doc, deformer, dtype, limit=True):
     if old_type == dtype:
         return deformer
     _stop_threads()
-    mesh = _mesh_of(deformer)
-    old_tag = get_selection_tag(deformer)
-    if old_tag is None:
-        raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % deformer.GetName())
+    whole = is_whole(deformer)
+    if whole:
+        mesh = _parent_of(deformer)
+        old_tag = None
+        whole_shape = whole_info(mesh, doc)
+    else:
+        mesh = _mesh_of(deformer)
+        old_tag = get_selection_tag(deformer)
+        if old_tag is None:
+            raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % deformer.GetName())
 
     doc.StartUndo()
     try:
-        tag = _usable_tag(doc, mesh, old_tag, dtype)
-        info = selection_from_tag(mesh, tag)
+        if whole:
+            tag, info, label_old, label_new = None, whole_shape, WHOLE_LABEL, WHOLE_LABEL
+        else:
+            tag = _usable_tag(doc, mesh, old_tag, dtype)
+            info = selection_from_tag(mesh, tag)
+            label_old, label_new = old_tag.GetName(), tag.GetName()
         new = _new_deformer(doc, dtype)
         # 名前: プラグインが付けた名前のままなら種類名を差し替える
-        if deformer.GetName() == _deformer_name(old_type, old_tag.GetName()):
-            new.SetName(_deformer_name(dtype, tag.GetName()))
+        if deformer.GetName() == _deformer_name(old_type, label_old):
+            new.SetName(_deformer_name(dtype, label_new))
         else:
             new.SetName(deformer.GetName())
         for pid in (
@@ -1448,8 +1692,10 @@ def switch_type(doc, deformer, dtype, limit=True):
         if old_type in BOX_TYPES and dtype in BOX_TYPES:
             new[c4d.DEFORMOBJECT_MODE] = deformer[c4d.DEFORMOBJECT_MODE]
             fl = deformer[c4d.FIELDS]
-            if fl is not None and tag in weight_layer_targets(deformer, doc):
-                fields = fl  # 旧版（制限タグ）のデフォーマーは make_field_list でフィールド方式に移す
+            if fl is not None and (whole or tag in weight_layer_targets(deformer, doc)):
+                # 全体用はユーザーが足したフィールドだけなので、そのまま写す。
+                # 旧版（制限タグ）のデフォーマーは make_field_list でフィールド方式に移す
+                fields = fl
             if old_type in DIRECTION_ANGLE_TYPES and dtype in DIRECTION_ANGLE_TYPES:
                 new[c4d.DEFORMOBJECT_ANGLE] = deformer[c4d.DEFORMOBJECT_ANGLE]
         # 強さ: 単位が同じなら引き継ぐ。違えば初期値
@@ -1465,7 +1711,7 @@ def switch_type(doc, deformer, dtype, limit=True):
             if t.GetType() != c4d.Trestriction:
                 new.InsertTag(t.GetClone(c4d.COPYFLAGS_NONE), new.GetLastTag())
             t = t.GetNext()
-        _set_marker(new, KIND_DEFORMER, tag)
+        _set_marker(new, KIND_DEFORMER, tag, whole=whole)
 
         new.InsertAfter(deformer)
         new.SetMl(mat)
@@ -1473,7 +1719,7 @@ def switch_type(doc, deformer, dtype, limit=True):
         doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, deformer)
         deformer.Remove()
         # ベベル（エッジ）から箱の種類にしたときは、使われなくなったエッジ選択タグを消す
-        if tag != old_tag and is_marked(old_tag, KIND_TAG) and not _tag_still_used(mesh, old_tag, []):
+        if old_tag is not None and tag != old_tag and is_marked(old_tag, KIND_TAG) and not _tag_still_used(mesh, old_tag, []):
             doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, old_tag)
             old_tag.Remove()
         doc.SetActiveObject(new, c4d.SELECTION_NEW)
@@ -1494,24 +1740,33 @@ def add_stacked(doc, deformer, dtype, limit=True):
     if dtype not in DEFORMER_TYPES:
         raise SDError(tr("未対応のデフォーマーです。", "Unsupported deformer type."))
     _stop_threads()
-    mesh = _mesh_of(deformer)
-    old_tag = get_selection_tag(deformer)
-    if old_tag is None:
-        raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % deformer.GetName())
+    whole = is_whole(deformer)
+    if whole:
+        mesh = _parent_of(deformer)
+        old_tag = None
+        whole_shape = whole_info(mesh, doc)
+    else:
+        mesh = _mesh_of(deformer)
+        old_tag = get_selection_tag(deformer)
+        if old_tag is None:
+            raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % deformer.GetName())
 
     doc.StartUndo()
     try:
-        tag = _usable_tag(doc, mesh, old_tag, dtype)
-        info = selection_from_tag(mesh, tag)
+        if whole:
+            tag, info = None, whole_shape
+        else:
+            tag = _usable_tag(doc, mesh, old_tag, dtype)
+            info = selection_from_tag(mesh, tag)
         new = _new_deformer(doc, dtype)
-        new.SetName(_deformer_name(dtype, tag.GetName()))
+        new.SetName(_deformer_name(dtype, WHOLE_LABEL if whole else tag.GetName()))
         fields = None
         if deformer.GetType() in BOX_TYPES and dtype in BOX_TYPES:
             fl = deformer[c4d.FIELDS]
-            if fl is not None and tag in weight_layer_targets(deformer, doc):
+            if fl is not None and (whole or tag in weight_layer_targets(deformer, doc)):
                 fields = fl
         mat = _configure(new, dtype, tag, info, _axes_for(deformer, info), None, fields, limit)
-        _set_marker(new, KIND_DEFORMER, tag)
+        _set_marker(new, KIND_DEFORMER, tag, whole=whole)
 
         new.InsertAfter(deformer)
         new.SetMl(mat)
@@ -1524,23 +1779,45 @@ def add_stacked(doc, deformer, dtype, limit=True):
     return new
 
 
-def _relink_fields(deformer, old_tag, new_tag, doc):
-    """フィールドの変数タグレイヤーのリンクだけを old_tag → new_tag に付け替える（ほかのレイヤーは残す）。"""
+def _relink_fields(deformer, old_tag, new_tag, doc, limit=True):
+    """フィールドの変数タグレイヤーのリンクだけを old_tag → new_tag に付け替える（ほかのレイヤーは残す）。
+
+    old_tag=None（全体用から一部用にするとき）は、new_tag のレイヤーを足す（limit=False なら「有効」オフで）。
+    ユーザーが足したレイヤーがあれば残す。
+    """
     fl = deformer[c4d.FIELDS]
+    root = fl.GetLayersRoot() if fl is not None else None
+    if old_tag is None:
+        if root is not None and root.GetDown() is not None:
+            fl.InsertLayer(_new_weight_layer(new_tag, limit))
+            deformer[c4d.FIELDS] = fl
+        else:
+            deformer[c4d.FIELDS] = make_field_list(new_tag, limit)
+        return
     changed = False
-    if fl is not None:
-        root = fl.GetLayersRoot()
-        if root is not None:
-            for layer in _iter_layers(root.GetDown()):
-                if layer.GetType() == c4d.FLweight and layer.GetLinkedObject(doc) == old_tag:
-                    layer.SetLinkedObject(new_tag)
-                    changed = True
+    if root is not None:
+        for layer in _iter_layers(root.GetDown()):
+            if layer.GetType() == c4d.FLweight and layer.GetLinkedObject(doc) == old_tag:
+                layer.SetLinkedObject(new_tag)
+                changed = True
     deformer[c4d.FIELDS] = fl if changed else make_field_list(new_tag)
 
 
-def _refit_in_place(doc, deformer, mesh, tag, axes=None):
-    """tag の範囲に箱を合わせ直す。axes を渡せばその向き、無ければ今の向き（アンドゥは呼び出し側の StartUndo の中で）。"""
-    info = selection_from_tag(mesh, tag)
+def _unlink_fields(deformer, tag, doc):
+    """フィールドから tag を指す変数タグレイヤーを外す（全体用にするとき。ユーザーが足したレイヤーは残す）。"""
+    if tag is None:
+        return
+    fl = deformer[c4d.FIELDS]
+    layers = _weight_layers(fl, tag, doc)
+    if not layers:
+        return
+    for layer in layers:
+        layer.Remove()
+    deformer[c4d.FIELDS] = fl
+
+
+def _refit_in_place(doc, deformer, info, axes=None):
+    """info の範囲に箱を合わせ直す。axes を渡せばその向き、無ければ今の向き（アンドゥは呼び出し側の StartUndo の中で）。"""
     mat, size = fit_box(info, axes if axes is not None else _axes_of(deformer), deformer.GetType())
     is_shear = deformer.GetType() == c4d.Oshear
     old_shift = shear_shift(deformer) if is_shear else 0.0
@@ -1554,17 +1831,26 @@ def _refit_in_place(doc, deformer, mesh, tag, axes=None):
     deformer.Message(c4d.MSG_UPDATE)
 
 
-def recapture_selection(doc, deformer):
-    """親メッシュの今の選択（今のモード）で、デフォーマーの選択範囲タグを取り直す。アンドゥ1回。
+def recapture_selection(doc, deformer, limit=True):
+    """親メッシュの今の選択（今のモード）で、デフォーマーの選択範囲タグを取り直す。アンドゥ1回。(deformer, tag) を返す。
 
     - 選択の種類が今のタグと同じで、そのタグがプラグイン製なら、タグの中身を書き換える
       （同じタグを共有して重ねたデフォーマーも、それぞれの向きのまま箱を合わせ直す）。
     - 種類が違う（ポリゴン→ポイント等）か、ユーザー自身のタグなら、新しいタグを作って付け替える。
       使われなくなったプラグイン製の古いタグは消す。
+    - 全体用から一部用にするときは、タグのレイヤーを足す（limit=False なら「有効」オフで）。
+    - 何も選んでいない・モデルモードなどなら、全体用にする（tag は None）。
     - 向きと起点は、作成時と同じく新しい選択範囲で自動判定し直す（起点＝非選択側）。
     """
     _stop_threads()
-    mesh = _mesh_of(deformer)
+    mesh = _parent_of(deformer)
+    if not mesh.CheckType(c4d.Opolygon):
+        raise SDError(tr("「%s」はメッシュになっていないので、選択を取り直せません（C キーで編集可能にすると、一部だけにかけられます）。"
+                         "今の形に箱を合わせ直すときは「フィット」を使ってください。",
+                         "\"%s\" is not a mesh, so the selection cannot be updated (make it editable with C to work on a part). "
+                         "To fit the box to the current shape, use Fit.") % mesh.GetName())
+    if whole_reason(doc, mesh) is not None:
+        return _recapture_whole(doc, deformer, mesh), None
     dtype = deformer.GetType()
     tag_type, pts, poly_ids, _desc = selection_from_component_mode(doc, mesh)
     if len(pts) < 2:
@@ -1572,10 +1858,11 @@ def recapture_selection(doc, deformer):
     ids = pts
     if dtype == c4d.Obevel and doc.GetMode() == c4d.Medges:
         tag_type = c4d.Tedgeselection
-        ids = _edge_ids_or_all(mesh)
+        ids = _edge_ids_from(mesh.GetEdgeS(), mesh)
     elif tag_type == c4d.Tpolygonselection:
         ids = poly_ids
     old_tag = get_selection_tag(deformer)
+    old_label = WHOLE_LABEL if is_whole(deformer) else (old_tag.GetName() if old_tag is not None else None)
 
     doc.StartUndo()
     try:
@@ -1595,22 +1882,23 @@ def recapture_selection(doc, deformer):
 
         doc.AddUndo(c4d.UNDOTYPE_CHANGE, deformer)
         if tag != old_tag:
-            if old_tag is not None and deformer.GetName() == _deformer_name(dtype, old_tag.GetName()):
+            if old_label is not None and deformer.GetName() == _deformer_name(dtype, old_label):
                 deformer.SetName(_deformer_name(dtype, tag.GetName()))
             if dtype == c4d.Obevel:
                 _setup_bevel(deformer, tag)
             else:
-                _relink_fields(deformer, old_tag, tag, doc)
+                _relink_fields(deformer, old_tag, tag, doc, limit)
             _set_marker(deformer, KIND_DEFORMER, tag)
         elif dtype == c4d.Obevel:
             _setup_bevel(deformer, tag)
 
         # 新しい選択範囲で向きと起点を自動判定し直し、箱を合わせる
         # （このデフォーマーと、同じタグを使う箱の種類のデフォーマー。重ねたもの同士は同じ向きにそろえる）
-        axes = auto_frame(selection_from_tag(mesh, tag))
+        info = selection_from_tag(mesh, tag)
+        axes = auto_frame(info)
         for d in sd_deformers_under(mesh):
             if d.GetType() in BOX_TYPES and (d == deformer or get_selection_tag(d) == tag):
-                _refit_in_place(doc, d, mesh, tag, axes)
+                _refit_in_place(doc, d, info, axes)
 
         if old_tag is not None and tag != old_tag and is_marked(old_tag, KIND_TAG) and not _tag_still_used(mesh, old_tag, []):
             doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, old_tag)
@@ -1619,6 +1907,38 @@ def recapture_selection(doc, deformer):
         doc.EndUndo()
     c4d.EventAdd()
     return deformer, tag
+
+
+def _recapture_whole(doc, deformer, mesh):
+    """デフォーマーを全体用にする（何も選んでいないとき・モデルモードなどの「選択を取り直す」）。アンドゥ1回。
+
+    フィールドからプラグインのタグのレイヤーを外し（ユーザーのレイヤーは残す）、使われなくなったタグは消す。
+    ベベルは角だけ丸める設定にする（オフセットはそのまま）。箱は全体に合わせ、向きと起点は自動判定し直す。
+    """
+    dtype = deformer.GetType()
+    was_whole = is_whole(deformer)
+    old_tag = get_selection_tag(deformer)
+    info = whole_info(mesh, doc)
+    doc.StartUndo()
+    try:
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE, deformer)
+        if old_tag is not None and deformer.GetName() == _deformer_name(dtype, old_tag.GetName()):
+            deformer.SetName(_deformer_name(dtype, WHOLE_LABEL))
+        if dtype == c4d.Obevel:
+            if not was_whole:
+                _setup_bevel_whole(deformer)
+        else:
+            _unlink_fields(deformer, old_tag, doc)
+        _set_marker(deformer, KIND_DEFORMER, whole=True)
+        if dtype in BOX_TYPES:
+            _refit_in_place(doc, deformer, info, whole_frame(info))
+        if old_tag is not None and is_marked(old_tag, KIND_TAG) and not _tag_still_used(mesh, old_tag, []):
+            doc.AddUndo(c4d.UNDOTYPE_DELETEOBJ, old_tag)
+            old_tag.Remove()
+    finally:
+        doc.EndUndo()
+    c4d.EventAdd()
+    return deformer
 
 
 def create_or_switch(doc, dtype, add=False, limit=True):
@@ -1668,8 +1988,9 @@ def refit(doc, deformer):
 
 
 def reset_auto(doc, deformer):
-    """向きを自動判定に戻して合わせ直す。"""
-    return _reorient(doc, deformer, lambda info, axes: auto_frame(info))
+    """向きを自動判定に戻して合わせ直す（全体用はオブジェクトの軸にそろえた向き）。"""
+    make = whole_frame if is_whole(deformer) else auto_frame
+    return _reorient(doc, deformer, lambda info, axes: make(info))
 
 
 def cycle_axis(doc, deformer):
@@ -1748,10 +2069,16 @@ def face_band(deformer, axis, sign, ratio=0.15):
     帯にまるごと入るポリゴンが無ければ、帯に1点でもかかる選択ポリゴンを返す。
     """
     mesh = deformer.GetUp()
-    tag = get_selection_tag(deformer)
-    if mesh is None or tag is None:
-        return [], []
-    info = selection_from_tag(mesh, tag)
+    if mesh is None or not mesh.CheckType(c4d.Opolygon):
+        return [], []  # メッシュでない親（全体用）は、メッシュの点番号で描けないので帯なし
+    if is_whole(deformer):
+        # 描くのは親メッシュの上なので、子オブジェクトは含めずメッシュの点だけで帯を決める
+        info = SelectionInfo(mesh, range(mesh.GetPointCount()), range(mesh.GetPolygonCount()))
+    else:
+        tag = get_selection_tag(deformer)
+        if tag is None:
+            return [], []
+        info = selection_from_tag(mesh, tag)
     inv = ~deformer.GetMl()
     half = deformer[c4d.DEFORMOBJECT_SIZE] * 0.5
     h = (half.x, half.y, half.z)[axis]
@@ -1933,15 +2260,33 @@ def _apply_bevel_tool(doc, mesh, bevel, tag):
     ベベルは面を増やす（トポロジーが変わる）ので、ポイント位置の書き戻しでは焼き込めない。
     ツールならオブジェクトを作り直さずに、UV・選択範囲タグ・Nゴンも更新される。
     C4D 2027 で、点・エッジ・ポリゴンの3モードともデフォーマーと同じ形になることを確認済み。
+    全体用（タグなし）は、ツールに「角度を使う」が無いので、デフォーマーと同じ基準で角のエッジを選んでからかける。
     """
-    if tag is None:
-        raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % bevel.GetName())
     mode = bevel[c4d.O_BEVEL_MODE_COMPONENT_TYPE]
-    if BEVEL_MODE_FOR_TAG.get(tag.GetType()) != mode:
-        raise SDError(tr("「%s」のコンポーネントモードと、選択範囲タグ「%s」の種類が合いません。", "The component mode of \"%s\" does not match the type of the selection tag \"%s\".") % (bevel.GetName(), tag.GetName()))
     selection = {0: mesh.GetPointS, 1: mesh.GetEdgeS, 2: mesh.GetPolygonS}[mode]()
-    doc.AddUndo(c4d.UNDOTYPE_CHANGE, mesh)
-    tag.GetBaseSelect().CopyTo(selection)
+    if is_whole(bevel):
+        if mode == BEVEL_MODE_EDGES:
+            if bevel[c4d.O_BEVEL_MODE_SELECTION_ANGLE_USE]:
+                ids = sharp_edge_ids(mesh, bevel[c4d.O_BEVEL_MODE_SELECTION_ANGLE_VAL], BEVEL_WHOLE_BOUNDARY)
+            else:
+                ids = _all_edge_ids(mesh)
+        else:
+            ids = range(mesh.GetPointCount() if mode == 0 else mesh.GetPolygonCount())
+        if not ids:
+            # 丸める角が無い（平らな板など）。デフォーマーも何もしていないので形はそのまま。
+            # 選択なしでツールをかけると「全部」になってしまうので、かけない
+            return
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE, mesh)
+        selection.DeselectAll()
+        for i in ids:
+            selection.Select(i)
+    else:
+        if tag is None:
+            raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % bevel.GetName())
+        if BEVEL_MODE_FOR_TAG.get(tag.GetType()) != mode:
+            raise SDError(tr("「%s」のコンポーネントモードと、選択範囲タグ「%s」の種類が合いません。", "The component mode of \"%s\" does not match the type of the selection tag \"%s\".") % (bevel.GetName(), tag.GetName()))
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE, mesh)
+        tag.GetBaseSelect().CopyTo(selection)
     bc = c4d.BaseContainer()
     src = bevel.GetDataInstance()
     for pid in BEVEL_TOOL_PARAMS:
@@ -1974,6 +2319,12 @@ def freeze(doc, deformers):
     if not deformers:
         raise SDError(tr("フリーズするPartDeform のデフォーマーがありません。デフォーマーか、その親のオブジェクトを選択してください。", "No PartDeform deformer to freeze. Select a deformer or its parent object."))
     for d in deformers:
+        parent = d.GetUp()
+        if is_whole(d) and parent is not None and not parent.CheckType(c4d.Opolygon):
+            raise SDError(tr("「%s」はメッシュになっていない「%s」にかけているので、フリーズできません"
+                             "（C キーで編集可能にしてから、もう一度フリーズしてください）。",
+                             "\"%s\" works on \"%s\", which is not a mesh, so it cannot be frozen "
+                             "(make it editable with C, then freeze again).") % (d.GetName(), parent.GetName()))
         _mesh_of(d)
     _stop_threads()
     meshes = []
