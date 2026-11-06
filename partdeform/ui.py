@@ -61,14 +61,14 @@ ORIENT_BUTTONS = (
     (G_AUTO, ICON_AUTO, tr("自動", "Auto"),
      tr("向きと起点を自動判定に戻す", "Reset the direction and the anchor to automatic")),
     (G_CYCLE, ICON_CYCLE, tr("主軸", "Axis"),
-     tr("曲げる・ひねる軸（主軸）を、箱の別の軸に切り替える（起点は自動判定）",
-        "Switch the main (bend / twist) axis to another axis of the box (the anchor is chosen automatically)")),
+     tr("曲げる・ひねる軸（主軸）を、デフォーマーの別の軸に切り替える（起点は自動判定）",
+        "Switch the main (bend / twist) axis to another axis of the deformer (the anchor is chosen automatically)")),
     (G_ROT90, ICON_ROT90, tr("90°回転", "Rot 90°"),
      tr("主軸まわりに 90° 回す（曲げ・せん断の方向が変わる）",
         "Rotate 90° around the main axis (changes the bend / shear direction)")),
     (G_REFIT, ICON_REFIT, tr("フィット", "Fit"),
-     tr("今の向きのまま、選択範囲タグ（全体用はオブジェクトの今の形）に箱を合わせ直す（再フィット）",
-        "Refit the box to the selection tag (for a whole-object deformer, to the object's current shape), keeping the current direction")),
+     tr("今の向きのまま、デフォーマーの大きさを選択範囲タグ（全体用はオブジェクトの今の形）に合わせ直す（再フィット）",
+        "Refit the deformer's size to the selection tag (for a whole-object deformer, to the object's current shape), keeping the current direction")),
 )
 
 # 起点クリックツールを抜けたあとに戻すツール
@@ -200,8 +200,8 @@ def _whole_created_message(d, reason):
     parent = d.GetUp()
     message = tr("%s を作成しました。", "Created %s. ") % d.GetName() + _whole_note(reason, parent.GetName() if parent else "")
     if parent is not None and core.shape_children(parent):
-        message += tr("子オブジェクトも一緒に変形するので、箱は子も含めた大きさに合わせました。",
-                      " Child objects are deformed too, so the box covers them as well.")
+        message += tr("子オブジェクトも一緒に変形するので、デフォーマーの大きさは子も含めて合わせました。",
+                      " Child objects are deformed too, so the deformer is sized to include them.")
     if core.is_bevel(d):
         message += tr("角度が 40°以上の角だけ丸めます（属性マネージャーの「角度しきい値」で変えられます）。",
                       " Only corners of 40° or more are rounded (change it with Angle Threshold in the Attribute Manager).")
@@ -294,7 +294,7 @@ def do_limit(doc, on):
 # パネルの数値欄（3段）。選んでいるデフォーマーの種類で、名前と単位（長さ／角度）が切り替わる
 AMOUNT_LABEL_NONE = tr("量（PartDeform のデフォーマーを選ぶと使えます）", "Amount (select a PartDeform deformer)")
 DIRECTION_LABEL_NONE = tr("角度（屈曲・シアーで使えます）", "Angle (Bend / Shear)")
-FEATHER_LABEL_NONE = tr("ぼかし（選択範囲にかけた箱の種類で使えます）", "Feather (box types on a selection)")
+FEATHER_LABEL_NONE = tr("ぼかし（選択範囲にかけたデフォーマーで使えます）", "Feather (deformers on a selection)")
 ROW_IDS = (G_SHIFT, G_DIR, G_FEATHER)
 ROW_LABEL_ID = {G_SHIFT: G_SHIFT_LABEL, G_DIR: G_DIR_LABEL, G_FEATHER: G_FEATHER_LABEL}
 ROW_LABEL_NONE = {G_SHIFT: AMOUNT_LABEL_NONE, G_DIR: DIRECTION_LABEL_NONE, G_FEATHER: FEATHER_LABEL_NONE}
@@ -391,7 +391,7 @@ def do_feather(doc, value):
     def work():
         d, row = _row_target(doc, G_FEATHER)
         if d is None:
-            raise core.SDError(tr("選択範囲にかけた PartDeform の箱の種類（屈曲・シアー・テーパー・ツイスト・膨張）を選択してください。",
+            raise core.SDError(tr("選択範囲にかけた PartDeform の屈曲・シアー・テーパー・ツイスト・膨張を選択してください。",
                                   "Select a PartDeform Bend, Shear, Taper, Twist or Bulge that works on a selection."))
         core.set_feather(doc, d, value)
         width = core.feather_width(d)
@@ -434,7 +434,7 @@ def start_pick_tool(doc):
     try:
         target = core.edit_target(doc)
         if core.is_bevel(target):
-            raise core.SDError(tr("ベベルには箱や向きがないので、起点の指定はありません。", "Bevel has no box or direction, so it has no anchor."))
+            raise core.SDError(tr("ベベルには向きがないので、起点の指定はありません。", "Bevel has no direction, so it has no anchor."))
     except core.SDError as e:
         report(str(e), error=True)
         return

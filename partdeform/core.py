@@ -1275,7 +1275,7 @@ def set_amount_length(doc, deformer, value, undo=True):
     if lever is None:
         raise SDError(tr("シアー・テーパー・膨張・ベベル（比例モード以外）のPartDeform のデフォーマーを選択してください。", "Select a PartDeform Shear, Taper, Bulge or Bevel deformer (Bevel: not in Proportional offset mode)."))
     if lever < EPS:
-        raise SDError(tr("箱の幅が0なので、量を決められません。", "The deformer box has zero width, so the amount cannot be set."))
+        raise SDError(tr("デフォーマーの幅が0なので、量を決められません。", "The deformer has zero width, so the amount cannot be set."))
     param = length_param(deformer)
     strength = value / lever
     if is_bevel(deformer):
@@ -2078,9 +2078,9 @@ def recapture_selection(doc, deformer, limit=True):
     mesh = _parent_of(deformer)
     if not mesh.CheckType(c4d.Opolygon):
         raise SDError(tr("「%s」はメッシュになっていないので、選択を取り直せません（C キーで編集可能にすると、一部だけにかけられます）。"
-                         "今の形に箱を合わせ直すときは「フィット」を使ってください。",
+                         "今の形にデフォーマーの大きさを合わせ直すときは「フィット」を使ってください。",
                          "\"%s\" is not a mesh, so the selection cannot be updated (make it editable with C to work on a part). "
-                         "To fit the box to the current shape, use Fit.") % mesh.GetName())
+                         "To fit the deformer to the current shape, use Fit.") % mesh.GetName())
     if whole_reason(doc, mesh) is not None:
         return _recapture_whole(doc, deformer, mesh), None
     dtype = deformer.GetType()
@@ -2199,7 +2199,7 @@ def create_or_switch(doc, dtype, add=False, limit=True):
 # ---------------------------------------------------------------------------
 def _reorient(doc, deformer, make_axes, refresh_feather=False):
     if is_bevel(deformer):
-        raise SDError(tr("ベベルには箱や向きがありません（選択範囲のエッジ・ポリゴン・ポイントにかかります）。", "Bevel has no box or direction (it works on the selected edges, polygons or points)."))
+        raise SDError(tr("ベベルには大きさや向きがありません（選択範囲のエッジ・ポリゴン・ポイントにかかります）。", "Bevel has no size or direction (it works on the selected edges, polygons or points)."))
     _stop_threads()
     info = _info_of(deformer)
     axes = make_axes(info, _axes_of(deformer))

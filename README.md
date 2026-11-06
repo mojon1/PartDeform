@@ -13,9 +13,9 @@
 ▶ [Watch PartDeform in use on YouTube (50 s)](https://youtu.be/VMyHsNeK2TE)
 
 Select polygons, points or edges and click Bend, Shear, Taper, Twist, Bulge or Bevel.
-The deformer box is **sized, positioned and oriented to exactly that selection** (following the edge flow),
+The deformer is **sized, positioned and oriented to exactly that selection** (following the edge flow),
 and only the selected part is deformed. The side connected to the rest of the mesh becomes the anchor automatically.
-No more *Fit to Parent* that fits the whole object, rotating the box by hand, or dragging selection tags into Fields.
+No more *Fit to Parent* that fits the whole object, rotating the deformer by hand, or dragging selection tags into Fields.
 
 PartDeform brings the "deform just this part" workflow — like Modo falloffs or 3ds Max sub-object modifiers —
 to **Cinema 4D polygon modeling**. Adjust in real units (mm and degrees), switch or stack deformers,
@@ -62,12 +62,12 @@ You can assign the commands to shortcuts or palettes in the Command Manager.
    If the direction is wrong, press **Anchor** and click the side that should stay fixed, or use the other Anchor & Direction buttons.
 4. Press **Freeze** to bake the result. If you keep the deformer, it keeps working like any other deformer.
 
-- With a PartDeform deformer selected, a type button **switches the type** and keeps the box and the direction.
+- With a PartDeform deformer selected, a type button **switches the type** and keeps the size and the direction.
 - **Shift+click** a type button to **stack** a new deformer on the same selection and direction (for example Taper + Twist).
   While you hold Shift over the panel, a green + appears on the icons.
 - If a crease shows at the border of the selection, raise **Feather** in the panel: the effect fades inward from the border over that width.
 - To bend the middle of a pipe and let the rest follow, turn off **Limit to Selection** in the panel.
-  Unselected parts then deform like with a standard deformer, and the part beyond the box follows without changing shape.
+  Unselected parts then deform like with a standard deformer, and the part beyond the deformer follows without changing shape.
 ![Anchor mode: green = current anchor, orange = the side you are about to set](docs/images/anchor_en.png)
 
 *Anchor mode: the green band is the current anchor, the orange band is the side you would set by clicking.*
@@ -80,10 +80,10 @@ The deformer is applied to the whole object when nothing is selected, in Model m
 (a primitive, a generator such as Subdivision Surface, Extrude or Cloner, or a Null that groups objects).
 
 - No selection tag is made; it works like a standard deformer placed under the object. The name shows **[Whole]**.
-- The box fits the current shape, including child objects (they are deformed too). It is aligned to the object's axes:
+- The deformer is sized to the current shape, including child objects (they are deformed too), and aligned to the object's axes:
   the longest side becomes the main axis with the anchor at its minus end, and the bend goes toward the thinnest side.
 - **Update Selection** switches it: select a part on the mesh to make it work on that part, or select nothing to make it work on the whole again.
-- **Fit** refits the box to the object's current shape (for example after changing a primitive's size).
+- **Fit** refits the deformer to the object's current shape (for example after changing a primitive's size).
 - Bevel on the whole object rounds only corners of 40° or more (Angle Threshold in the Attribute Manager).
 - On an object that is not a mesh, Update Selection, Limit to Selection and Freeze become available once you make it editable with C.
 
@@ -92,16 +92,16 @@ The deformer is applied to the whole object when nothing is selected, in Model m
 | Item | What it does |
 |---|---|
 | Bend ... Bevel | Creates a deformer on a selected mesh; switches the type on a selected PartDeform deformer; Shift+click stacks another one |
-| Limit to Selection | **On (default)**: only the selected part deforms. **Off**: the Variable Tag layer in the Fields is disabled, so the deformer works like a standard one (unselected parts inside the box deform too, and with Bend the part beyond the box follows the bend). Shows and switches the selected PartDeform deformer (one undo step), and is also the setting for new deformers (kept after you quit Cinema 4D). Not used for Bevel |
+| Limit to Selection | **On (default)**: only the selected part deforms. **Off**: the Variable Tag layer in the Fields is disabled, so the deformer works like a standard one (unselected parts inside the deformer deform too, and with Bend the part beyond it follows the bend). Shows and switches the selected PartDeform deformer (one undo step), and is also the setting for new deformers (kept after you quit Cinema 4D). Not used for Bevel |
 | Value field (1st row) | **Bend: strength (bend angle), Twist: angle** as angles. **Shear: tip offset, Taper: tip inset per side, Bulge: middle bulge per side, Bevel: offset** as real lengths (the strength % is calculated for you). Uses your Cinema 4D unit settings |
 | Value field (2nd row) | **Bend / Shear angle (direction)**. For Shear, the strength is recalculated so the tip offset (length) stays the same |
 | Feather (3rd row) | **Fades the effect inward from the border** of the selection over this width (a length), so no crease appears at the border. 0 = sharp border (default). Uses a Vertex Map tag in the deformer's Fields, one per deformer; it follows Update Selection, type switches and Fit. Needs Limit to Selection on. Not for Bevel or the whole object |
 | Anchor | Anchor mode: click a side of the object in the viewport to make it the anchor. Keep clicking to switch. Green band = current anchor, orange band = the side you would set. Click outside the object, press Anchor again, press another button, or Esc to finish |
 | Flip | Swap the anchor and the tip |
 | Auto | Reset the direction and the anchor to automatic |
-| Axis | Switch the main (bend / twist) axis to another axis of the box |
+| Axis | Switch the main (bend / twist) axis to another axis of the deformer |
 | Rot 90° | Rotate 90° around the main axis (changes the bend / shear direction) |
-| Fit | Refit the box to the selection tag, keeping the direction (after editing the mesh or the tag). For a whole-object deformer, refit to the object's current shape |
+| Fit | Refit the deformer's size to the selection tag, keeping the direction (after editing the mesh or the tag). For a whole-object deformer, refit to the object's current shape |
 | Update Selection | Replace the selection tag with the mesh's current selection and detect the direction and anchor again (like changing the sub-object selection below a modifier in 3ds Max) |
 | Freeze | Bake the deformation into the polygons and remove the deformer and the selection tag created by PartDeform. Tags, materials, UVs and hierarchy stay. One undo step. Only the mesh itself is baked, so child objects that were deformed together go back to their original shape (the message tells you) |
 | Deformed Editing | Toggles the viewport option "Deformed Editing" for the active view (the same setting as in the view menu) |
@@ -113,15 +113,15 @@ Messages are shown in the Cinema 4D status bar and the console.
 
 - **Anchor on the unselected side**: the border between the selection and the rest is the anchor, and the main axis points from the border to the farthest part (for a protrusion: base to tip).
 - **Bend direction**: toward the surface normal for a surface selection; the thinner direction of the cross-section for protrusions.
-- **Follows the edge flow**: the in-plane direction and the rotation around the main axis follow the edges of the selected polygons, so the box lines up with the edges even on slanted faces or square-like selections.
+- **Follows the edge flow**: the in-plane direction and the rotation around the main axis follow the edges of the selected polygons, so the deformer lines up with the edges even on slanted faces or square-like selections.
 - When the border surrounds the selection (for example, only the middle of a face is selected), the direction is taken from the shape.
-- For the whole object, the box is aligned to the object's axes instead (see [Whole object](#whole-object)).
+- For the whole object, the deformer is aligned to the object's axes instead (see [Whole object](#whole-object)).
 
 ## Bevel
 
 Bevel works differently from the other five (it cuts corners and adds faces, so the topology changes).
 
-- It has no box and no Fields. It is limited by putting the selection tag's name into the Bevel deformer's "Selection" field (the standard Cinema 4D way).
+- Unlike the other five, it has no size, direction or Fields. It is limited by putting the selection tag's name into the Bevel deformer's "Selection" field (the standard Cinema 4D way).
 - "Use Angle" is turned off. The offset starts at 3% of the selection size.
 - The Anchor & Direction buttons do not apply. The value field shows the Bevel offset as a length (not in Proportional offset mode).
 - Freeze applies the Bevel tool with the same settings directly to the mesh (UVs, selection tags and n-gons are updated correctly).
@@ -134,13 +134,13 @@ Bevel works differently from the other five (it cuts corners and adds faces, so 
 - The effect is limited with a Variable Tag layer in the deformer's **Fields**, pointing to the selection tag (`PD_Sel`, `PD_Sel.1`, ...).
   This is the same as dragging the selection tag into the Fields yourself, so you can add falloff fields on top.
   Turning off Limit to Selection disables this layer. The layer and the tag stay, so enabling it again in the Attribute Manager does the same.
-- The bottom of the box (local -Y) has no effect and the top has the full effect (Bulge: both ends have no effect). The bottom is placed at the anchor of the selection.
+- The bottom of the deformer (local -Y) has no effect and the top has the full effect (Bulge: both ends have no effect). The bottom is placed at the anchor of the selection.
 
 ## Notes
 
 - **Child objects of the mesh are deformed too.** A Variable Tag field layer returns full weight for objects without the tag (standard Cinema 4D behavior). A warning is shown in the status bar when the deformer is created. Freeze bakes only the mesh.
 - If both ends of the selection connect to unselected parts, the border at the tip side shows a step or distortion (because the effect is limited by the Fields). Turn off Limit to Selection to let the rest follow.
-- Shear strength is a percentage of the box width (Cinema 4D's definition), so shearing a flat face along its normal needs several hundred %. The panel shows the real offset as a length.
+- Shear strength is a percentage of the deformer's width (Cinema 4D's definition), so shearing a flat face along its normal needs several hundred %. The panel shows the real offset as a length.
 - Switching the type does not carry over keyframes on the deformer itself.
 - Meshes with a Normal tag (explicit normals) keep the old normals after Freeze.
 
