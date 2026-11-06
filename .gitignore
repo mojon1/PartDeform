@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+
+# Cinema 4D の自動保存・バックアップ
+*.c4d.bak
+backup/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 配布用に作るファイル
+dist/
