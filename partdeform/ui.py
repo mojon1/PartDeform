@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""選択範囲デフォーマー: パネル・起点クリックツール・コマンド・メニュー。"""
+"""PartDeform: パネル・起点クリックツール・コマンド・メニュー。"""
 import math
 
 import c4d
@@ -8,8 +8,9 @@ from c4d import gui, plugins
 from . import core
 from . import icons
 from . import winowner
+from .i18n import tr
 
-TITLE = "選択範囲デフォーマー"
+TITLE = "PartDeform"
 LOG_PREFIX = "[%s] " % TITLE
 
 # パネルのガジェットID
@@ -43,13 +44,24 @@ ICON_FREEZE = 12233  # 現在の状態をオブジェクト化（雪の結晶）
 # 左3つ＝起点（起点・反転・自動）、右3つ＝方向と箱（主軸・90°回転・フィット）。
 # 名前は種類ボタン（屈曲〜ベベル）より幅が広がらないよう短くし、詳しい説明はツールチップに書く
 ORIENT_BUTTONS = (
-    (G_PICK, ICON_PICK, "起点", "ビューでクリックした端を起点（効果0）にする。続けて切り替えられる。"
-                                "終了は対象の外をクリック・もう一度このボタン・ほかのボタン・Esc"),
-    (G_FLIP, ICON_FLIP, "反転", "起点と先端を入れ替える"),
-    (G_AUTO, ICON_AUTO, "自動", "向きと起点を自動判定に戻す"),
-    (G_CYCLE, ICON_CYCLE, "主軸", "曲げる・ひねる軸（主軸）を、箱の別の軸に切り替える（起点は自動判定）"),
-    (G_ROT90, ICON_ROT90, "90°回転", "主軸まわりに 90° 回す（曲げ・せん断の方向が変わる）"),
-    (G_REFIT, ICON_REFIT, "フィット", "今の向きのまま、選択範囲タグに箱を合わせ直す（再フィット）"),
+    (G_PICK, ICON_PICK, tr("起点", "Anchor"),
+     tr("ビューでクリックした端を起点（効果0）にする。続けて切り替えられる。"
+        "終了は対象の外をクリック・もう一度このボタン・ほかのボタン・Esc",
+        "Click a side of the mesh in the viewport to make it the anchor (no effect there). You can keep clicking "
+        "to switch. To finish: click outside the object, press this button again, press another button, or Esc")),
+    (G_FLIP, ICON_FLIP, tr("反転", "Flip"),
+     tr("起点と先端を入れ替える", "Swap the anchor and the tip")),
+    (G_AUTO, ICON_AUTO, tr("自動", "Auto"),
+     tr("向きと起点を自動判定に戻す", "Reset the direction and the anchor to automatic")),
+    (G_CYCLE, ICON_CYCLE, tr("主軸", "Axis"),
+     tr("曲げる・ひねる軸（主軸）を、箱の別の軸に切り替える（起点は自動判定）",
+        "Switch the main (bend / twist) axis to another axis of the box (the anchor is chosen automatically)")),
+    (G_ROT90, ICON_ROT90, tr("90°回転", "Rot 90°"),
+     tr("主軸まわりに 90° 回す（曲げ・せん断の方向が変わる）",
+        "Rotate 90° around the main axis (changes the bend / shear direction)")),
+    (G_REFIT, ICON_REFIT, tr("フィット", "Fit"),
+     tr("今の向きのまま、選択範囲タグに箱を合わせ直す（再フィット）",
+        "Refit the box to the selection tag, keeping the current direction")),
 )
 
 # 起点クリックツールを抜けたあとに戻すツール
@@ -109,21 +121,25 @@ def do_type(doc, dtype, add=False):
         previous_name = previous.GetName() if previous is not None else ""
         d, how = core.create_or_switch(doc, dtype, add=add)
         if how == "add":
-            report("%s を追加しました（%s と同じ選択範囲・向きで重ねました）。" % (d.GetName(), previous_name))
+            report(tr("%s を追加しました（%s と同じ選択範囲・向きで重ねました）。", "Added %s (stacked on %s with the same selection and direction).") % (d.GetName(), previous_name))
         elif how == "create" and core.is_bevel(d):
             # ベベルは選択範囲タグの名前で限定するので、タグを持たない子オブジェクトには効かない
-            report("%s を作成しました。オフセットはパネルの量の欄か属性マネージャーで調整できます。" % d.GetName())
+            report(tr("%s を作成しました。オフセットはパネルの量の欄か属性マネージャーで調整できます。", "Created %s. Adjust the offset in the panel or in the Attribute Manager.") % d.GetName())
         elif how == "create":
-            message = "%s を作成しました。向きが違うときは「起点と方向」のボタン（「起点」でクリック指定）で直せます。" % d.GetName()
+            message = tr("%s を作成しました。向きが違うときは「起点と方向」のボタン（「起点」でクリック指定）で直せます。", "Created %s. If the direction is wrong, fix it with the Anchor & Direction buttons (Anchor lets you click the side).") % d.GetName()
             children = core.affected_children(d.GetUp())
             if children:
-                names = "」「".join(c.GetName() for c in children[:3]) + ("」ほか" if len(children) > 3 else "」")
-                report("%s を作成しました。子オブジェクト「%sも一緒に変形します（フィールドの変数タグは、タグを持たない子を除外できません）。"
+                names = tr("、", ", ").join(tr("「%s」", '"%s"') % c.GetName() for c in children[:3])
+                if len(children) > 3:
+                    names += tr("ほか", " and others")
+                report(tr("%s を作成しました。子オブジェクト %s も一緒に変形します（フィールドの変数タグは、タグを持たない子を除外できません）。",
+                          "Created %s. The child object(s) %s are deformed too (a Variable Tag field cannot exclude "
+                          "children that do not have the tag).")
                        % (d.GetName(), names), error=True)
             else:
                 report(message)
         else:
-            report("%s に切り替えました。" % name)
+            report(tr("%s に切り替えました。", "Switched to %s.") % name)
         return d
 
     return _run(doc, None, work)
@@ -135,18 +151,18 @@ def do_reorient(doc, func, label):
 
 
 def do_recapture(doc):
-    """選択中の選択範囲デフォーマー（またはメッシュの下にただ1つあるもの）の選択範囲を、メッシュの今の選択で取り直す。"""
+    """選択中の PartDeform のデフォーマー（またはメッシュの下にただ1つあるもの）の選択範囲を、メッシュの今の選択で取り直す。"""
     leave_pick_mode(doc)
 
     def work():
         try:
             target = core.edit_target(doc)
         except core.SDError:
-            raise core.SDError("選択を取り直すデフォーマーを選んでください（メッシュで選択し直したあと、オブジェクトマネージャーでデフォーマーをクリック）。")
+            raise core.SDError(tr("選択を取り直すデフォーマーを選んでください（メッシュで選択し直したあと、オブジェクトマネージャーでデフォーマーをクリック）。", "Select the deformer to update (reselect on the mesh, then click the deformer in the Object Manager)."))
         d, tag = core.recapture_selection(doc, target)
         shared = [x for x in core.sd_deformers_under(d.GetUp()) if x != d and core.get_selection_tag(x) == tag]
-        note = "（同じタグを使う %d 個も合わせ直しました）" % len(shared) if shared else ""
-        report("%s の選択範囲を取り直しました（タグ「%s」）%s。向きと起点は自動判定し直したので、違うときは「起点と方向」のボタンで直せます。"
+        note = tr("（同じタグを使う %d 個も合わせ直しました）", " (also refitted %d deformer(s) sharing the tag)") % len(shared) if shared else ""
+        report(tr("%s の選択範囲を取り直しました（タグ「%s」）%s。向きと起点は自動判定し直したので、違うときは「起点と方向」のボタンで直せます。", "Updated the selection of %s (tag \"%s\")%s. The direction and the anchor were detected again; fix them with the Anchor & Direction buttons if needed.")
                % (d.GetName(), tag.GetName(), note))
         return d
 
@@ -159,15 +175,15 @@ def do_freeze(doc):
     def work():
         targets = core.freeze_targets(doc)
         meshes = core.freeze(doc, targets)
-        report("%d 個のデフォーマーをフリーズしました（%s）。" % (len(targets), "、".join(m.GetName() for m in meshes)))
+        report(tr("%d 個のデフォーマーをフリーズしました（%s）。", "Froze %d deformer(s) (%s).") % (len(targets), tr("、", ", ").join(m.GetName() for m in meshes)))
         return meshes
 
     return _run(doc, None, work)
 
 
 # パネルの数値欄（2段）。選んでいるデフォーマーの種類で、名前と単位（長さ／角度）が切り替わる
-AMOUNT_LABEL_NONE = "量（選択範囲デフォーマーを選ぶと使えます）"
-DIRECTION_LABEL_NONE = "角度（屈曲・シアーで使えます）"
+AMOUNT_LABEL_NONE = tr("量（PartDeform のデフォーマーを選ぶと使えます）", "Amount (select a PartDeform deformer)")
+DIRECTION_LABEL_NONE = tr("角度（屈曲・シアーで使えます）", "Angle (Bend / Shear)")
 ROW_LABEL_ID = {G_SHIFT: G_SHIFT_LABEL, G_DIR: G_DIR_LABEL}
 ROW_LABEL_NONE = {G_SHIFT: AMOUNT_LABEL_NONE, G_DIR: DIRECTION_LABEL_NONE}
 ROW_CONTENT = {G_SHIFT: core.amount_row, G_DIR: core.direction_row}
@@ -177,7 +193,7 @@ ROW_PARAMS = {G_SHIFT: core.amount_params, G_DIR: core.direction_params}
 def _row_target(doc, gid):
     """数値欄 gid の対象と中身: (デフォーマー, (名前, 単位, 値, スライダー範囲))。使えなければ (None, None)。
 
-    対象は選択中、または選択オブジェクト直下にただ1つある選択範囲デフォーマー。
+    対象は選択中、または選択オブジェクト直下にただ1つある PartDeform のデフォーマー。
     ベベルのオフセットモードが「比例」のときは長さではないので量の欄は使えない。
     """
     d = _target_or_none(doc) if doc is not None else None
@@ -189,11 +205,11 @@ def set_deformed_edit(doc, on):
     """アクティブなビューの「デフォーマ後に編集」を切り替える（ビューの表示メニューと同じ設定を書き換えるだけ）。"""
     bd = doc.GetActiveBaseDraw() if doc is not None else None
     if bd is None:
-        report("アクティブなビューがありません。", error=True)
+        report(tr("アクティブなビューがありません。", "There is no active view."), error=True)
         return
     bd[c4d.BASEDRAW_DATA_DEFORMEDEDIT] = bool(on)
     c4d.EventAdd()
-    report("デフォーマ後に編集を%sにしました（アクティブなビュー）。" % ("オン" if on else "オフ"))
+    report(tr("デフォーマ後に編集を%sにしました（アクティブなビュー）。", "Turned Deformed Editing %s (active view).") % (tr("オン", "on") if on else tr("オフ", "off")))
 
 
 def redraw_now():
@@ -225,15 +241,15 @@ def do_amount(doc, value):
     def work():
         d, row = _row_target(doc, G_SHIFT)
         if d is None:
-            raise core.SDError("選択範囲デフォーマーを選択してください（ベベルはオフセットモードが「比例」以外のとき）。")
+            raise core.SDError(tr("PartDeform のデフォーマーを選択してください（ベベルはオフセットモードが「比例」以外のとき）。", "Select a PartDeform deformer (Bevel: offset mode other than Proportional)."))
         core.set_amount(doc, d, value)
         label, unit = row[0], row[1]
         if core.is_bevel(d):
-            report("%s を %s にしました。" % (label, format_length(d[c4d.O_BEVEL_RADIUS])))
+            report(tr("%s を %s にしました。", "Set %s to %s.") % (label, format_length(d[c4d.O_BEVEL_RADIUS])))
         elif unit == core.UNIT_ANGLE:
-            report("%s を %s にしました。" % (label, format_angle(value)))
+            report(tr("%s を %s にしました。", "Set %s to %s.") % (label, format_angle(value)))
         else:
-            report("%s を %s にしました（強度 %.1f%%）。" % (label, format_length(value), d[c4d.DEFORMOBJECT_STRENGTH] * 100.0))
+            report(tr("%s を %s にしました（強度 %.1f%%）。", "Set %s to %s (strength %.1f%%).") % (label, format_length(value), d[c4d.DEFORMOBJECT_STRENGTH] * 100.0))
         return d
 
     return _run(doc, None, work)
@@ -244,13 +260,13 @@ def do_direction(doc, value):
     def work():
         d, row = _row_target(doc, G_DIR)
         if d is None:
-            raise core.SDError("屈曲かシアーの選択範囲デフォーマーを選択してください。")
+            raise core.SDError(tr("屈曲かシアーのPartDeform のデフォーマーを選択してください。", "Select a PartDeform Bend or Shear deformer."))
         core.set_direction(doc, d, value)
         if d.GetType() == c4d.Oshear:
-            report("%s を %s にしました（先端のずれ %s、強度 %.1f%%）。" % (
+            report(tr("%s を %s にしました（先端のずれ %s、強度 %.1f%%）。", "Set %s to %s (tip offset %s, strength %.1f%%).") % (
                 row[0], format_angle(value), format_length(core.shear_shift(d)), d[c4d.DEFORMOBJECT_STRENGTH] * 100.0))
         else:
-            report("%s を %s にしました。" % (row[0], format_angle(value)))
+            report(tr("%s を %s にしました。", "Set %s to %s.") % (row[0], format_angle(value)))
         return d
 
     return _run(doc, None, work)
@@ -267,7 +283,7 @@ def show_in_attribute_manager(obj):
         gui.ActiveObjectManager_SetObject(
             c4d.ACTIVEOBJECTMODE_OBJECT, obj, c4d.ACTIVEOBJECTMANAGER_SETOBJECTS_OPEN, c4d.DescID())
     except Exception as e:  # 表示の切り替えに失敗しても操作は続ける
-        print(LOG_PREFIX + "属性マネージャーを切り替えられませんでした: %r" % e)
+        print(LOG_PREFIX + tr("属性マネージャーを切り替えられませんでした: %r", "Could not switch the Attribute Manager: %r") % e)
 
 
 def _target_or_none(doc):
@@ -282,7 +298,7 @@ def start_pick_tool(doc):
     try:
         target = core.edit_target(doc)
         if core.is_bevel(target):
-            raise core.SDError("ベベルには箱や向きがないので、起点の指定はありません。")
+            raise core.SDError(tr("ベベルには箱や向きがないので、起点の指定はありません。", "Bevel has no box or direction, so it has no anchor."))
     except core.SDError as e:
         report(str(e), error=True)
         return
@@ -291,8 +307,7 @@ def start_pick_tool(doc):
         _previous_tool = current
     doc.SetAction(core.ID_TOOL_PICK)
     show_in_attribute_manager(target)
-    report("起点（効果0）にしたい端をクリックしてください。続けて切り替えられます。"
-           "終了は、対象の外をクリック・もう一度「起点」・ほかのボタン・Esc。")
+    report(tr("起点（効果0）にしたい端をクリックしてください。続けて切り替えられます。終了は、対象の外をクリック・もう一度「起点」・ほかのボタン・Esc。", "Click the side to use as the anchor (no effect there). You can keep clicking to switch. To finish: click outside the object, press Anchor again, press another button, or Esc."))
     c4d.EventAdd()
 
 
@@ -320,14 +335,14 @@ def leave_pick_mode(doc):
 # ---------------------------------------------------------------------------
 # パネル
 # ---------------------------------------------------------------------------
-class SelectionDeformerPanel(gui.GeDialog):
+class PartDeformPanel(gui.GeDialog):
     def CreateLayout(self):
         self.SetTitle(TITLE)
         self.GroupBegin(1000, c4d.BFH_SCALEFIT | c4d.BFV_TOP, cols=1)
         self.GroupBorderSpace(6, 6, 6, 6)
         self.GroupSpace(4, 4)
 
-        self.AddStaticText(0, c4d.BFH_LEFT, name="種類（作成／切り替え）")
+        self.AddStaticText(0, c4d.BFH_LEFT, name=tr("種類（作成／切り替え）", "Type (create / switch)"))
         self.GroupBegin(1001, c4d.BFH_SCALEFIT, cols=len(core.DEFORMER_TYPES))
         self.GroupSpace(2, 2)
         for i, dtype in enumerate(core.DEFORMER_TYPES):
@@ -343,7 +358,7 @@ class SelectionDeformerPanel(gui.GeDialog):
         self.AddEditSlider(G_DIR, c4d.BFH_SCALEFIT)
 
         self.AddSeparatorH(0, c4d.BFH_SCALEFIT)
-        self.AddStaticText(0, c4d.BFH_LEFT, name="起点と方向")
+        self.AddStaticText(0, c4d.BFH_LEFT, name=tr("起点と方向", "Anchor & Direction"))
         self.GroupBegin(1002, c4d.BFH_SCALEFIT, cols=len(ORIENT_BUTTONS))  # 横1列
         self.GroupSpace(2, 2)  # 種類ボタンと同じ間隔
         for gid, icon, label, tip in ORIENT_BUTTONS:
@@ -354,15 +369,15 @@ class SelectionDeformerPanel(gui.GeDialog):
         self.AddSeparatorH(0, c4d.BFH_SCALEFIT)
         self.GroupBegin(1003, c4d.BFH_SCALEFIT, cols=2)
         self.GroupSpace(2, 4)
-        self._add_icon_button(G_RECAPTURE, ICON_RECAPTURE, "選択を取り直す",
-                              "メッシュの今の選択（今のモード）で選択範囲タグを取り直し、向きと起点も自動判定し直す")
-        self._add_icon_button(G_FREEZE, ICON_FREEZE, "フリーズ",
-                              "変形をポリゴンに書き込み、デフォーマーとプラグイン製の選択範囲タグを消す（アンドゥ1回で戻る）")
+        self._add_icon_button(G_RECAPTURE, ICON_RECAPTURE, tr("選択を取り直す", "Update Selection"),
+                              tr("メッシュの今の選択（今のモード）で選択範囲タグを取り直し、向きと起点も自動判定し直す", "Replace the selection tag with the mesh's current selection (current mode) and detect the direction and the anchor again"))
+        self._add_icon_button(G_FREEZE, ICON_FREEZE, tr("フリーズ", "Freeze"),
+                              tr("変形をポリゴンに書き込み、デフォーマーと PartDeform が作った選択範囲タグを消す（アンドゥ1回で戻る）", "Bake the deformation into the polygons and remove the deformer and the selection tag created by PartDeform (one undo step)"))
         self.GroupEnd()
 
         # ビューの「表示 ＞ デフォーマ後に編集」と同じ設定（アクティブなビュー）。パネルは値を読み書きするだけ
         self.AddSeparatorH(0, c4d.BFH_SCALEFIT)
-        self.AddCheckbox(G_DEFORMEDIT, c4d.BFH_LEFT, 0, 0, name="デフォーマ後に編集（アクティブなビュー）")
+        self.AddCheckbox(G_DEFORMEDIT, c4d.BFH_LEFT, 0, 0, name=tr("デフォーマ後に編集（アクティブなビュー）", "Deformed Editing (active view)"))
         self.GroupEnd()
         return True
 
@@ -399,7 +414,7 @@ class SelectionDeformerPanel(gui.GeDialog):
         """標準デフォーマーのアイコンと名前。アイコンを押すと作成／切り替え（Shift＋クリックで追加）。"""
         self._add_icon_button(
             gid, dtype, c4d.GetObjectName(dtype),
-            "メッシュ選択中は作成、選択範囲デフォーマー選択中は切り替え。Shift＋クリックで同じ選択範囲に重ねて追加")
+            tr("メッシュ選択中は作成、PartDeform のデフォーマー選択中は切り替え。Shift＋クリックで同じ選択範囲に重ねて追加", "Creates on a selected mesh, switches the type on a selected PartDeform deformer. Shift+click to stack another deformer on the same selection"))
 
     def InitValues(self):
         # スライダーのドラッグ中: (欄のID, デフォーマー, {パラメーター: ドラッグ前の値}, ドラッグ前のシアーのずれ)
@@ -571,24 +586,24 @@ class SelectionDeformerPanel(gui.GeDialog):
             add = bool(qual & c4d.QSHIFT) or shift_down()
             do_type(doc, core.DEFORMER_TYPES[cid - G_TYPE_BASE], add=add)
         elif cid == G_CYCLE:
-            do_reorient(doc, core.cycle_axis, "主軸を切り替えました。")
+            do_reorient(doc, core.cycle_axis, tr("主軸を切り替えました。", "Switched the main axis."))
         elif cid == G_FLIP:
-            do_reorient(doc, core.flip, "起点と先端を入れ替えました。")
+            do_reorient(doc, core.flip, tr("起点と先端を入れ替えました。", "Swapped the anchor and the tip."))
         elif cid == G_ROT90:
-            do_reorient(doc, core.rotate90, "主軸まわりに90°回しました。")
+            do_reorient(doc, core.rotate90, tr("主軸まわりに90°回しました。", "Rotated 90° around the main axis."))
         elif cid == G_PICK:
             # もう一度押すと抜ける（押すたびにモードのオン／オフ）
             if pick_mode_on(doc):
-                report("起点の指定を終了しました。")
+                report(tr("起点の指定を終了しました。", "Finished setting the anchor."))
                 end_pick_tool(doc)
             else:
                 start_pick_tool(doc)
             # ボタンはクリックで見た目が自動で切り替わるので、実際のモードに合わせ直す（入れなかったときなど）
             self._sync_pick_toggle(force=True)
         elif cid == G_AUTO:
-            do_reorient(doc, core.reset_auto, "向きを自動判定に戻しました。")
+            do_reorient(doc, core.reset_auto, tr("向きを自動判定に戻しました。", "Reset the direction to automatic."))
         elif cid == G_REFIT:
-            do_reorient(doc, core.refit, "選択範囲に合わせ直しました。")
+            do_reorient(doc, core.refit, tr("選択範囲に合わせ直しました。", "Refitted to the selection."))
         elif cid == G_FREEZE:
             do_freeze(doc)
         elif cid == G_RECAPTURE:
@@ -603,7 +618,7 @@ class SelectionDeformerPanel(gui.GeDialog):
         return True
 
 
-_panel = SelectionDeformerPanel()
+_panel = PartDeformPanel()
 
 
 # ---------------------------------------------------------------------------
@@ -627,7 +642,7 @@ class PickRootTool(plugins.ToolData):
     def KeyboardInput(self, doc, data, bd, win, msg):
         if msg[c4d.BFM_INPUT_CHANNEL] == c4d.KEY_ESC:
             self.hover = None
-            report("起点の指定を終了しました。")
+            report(tr("起点の指定を終了しました。", "Finished setting the anchor."))
             end_pick_tool(doc)
             return True
         return False
@@ -650,15 +665,15 @@ class PickRootTool(plugins.ToolData):
         d, face = self._face_at(doc, bd, msg[c4d.BFM_INPUT_X], msg[c4d.BFM_INPUT_Y])
         self.hover = None
         if face is None:
-            report("起点の指定を終了しました。")
+            report(tr("起点の指定を終了しました。", "Finished setting the anchor."))
             end_pick_tool(doc)
             return True
         if face == (1, -1):
-            report("そこは今の起点です。ほかの端をクリックしてください（対象の外をクリックか、もう一度「起点」で終了）。")
+            report(tr("そこは今の起点です。ほかの端をクリックしてください（対象の外をクリックか、もう一度「起点」で終了）。", "That is already the anchor. Click another side (click outside the object or press Anchor again to finish)."))
             return True
         try:
             core.set_root_face(doc, d, face[0], face[1])
-            report("起点を変更しました。続けてほかの端もクリックできます（対象の外をクリックか、もう一度「起点」で終了）。")
+            report(tr("起点を変更しました。続けてほかの端もクリックできます（対象の外をクリックか、もう一度「起点」で終了）。", "Anchor changed. You can keep clicking other sides (click outside the object or press Anchor again to finish)."))
         except core.SDError as e:
             report(str(e), error=True)
         show_in_attribute_manager(d)
@@ -674,10 +689,10 @@ class PickRootTool(plugins.ToolData):
         d, face = self._face_at(doc, bd, x, y)
         if face is None:
             # 対象の外: クリックすると抜けることを示す（オレンジの帯も出さない）
-            bc.SetString(c4d.RESULT_BUBBLEHELP, "対象の外をクリックすると、起点の指定を終了します")
+            bc.SetString(c4d.RESULT_BUBBLEHELP, tr("対象の外をクリックすると、起点の指定を終了します", "Click outside the object to finish setting the anchor"))
             bc.SetInt32(c4d.RESULT_CURSOR, c4d.MOUSE_NORMAL)
         else:
-            bc.SetString(c4d.RESULT_BUBBLEHELP, "クリックでこの端を起点（効果0）に。続けて切り替えられます")
+            bc.SetString(c4d.RESULT_BUBBLEHELP, tr("クリックでこの端を起点（効果0）に。続けて切り替えられます", "Click to make this side the anchor (no effect there). You can keep switching"))
             bc.SetInt32(c4d.RESULT_CURSOR, c4d.MOUSE_POINT_HAND)
         if face != self.hover:
             self.hover = face
@@ -765,9 +780,9 @@ class PickRootTool(plugins.ToolData):
             return c4d.TOOLDRAW_NONE
         hovering_other = self.hover is not None and self.hover != (1, -1)
         # 今の起点（箱の底面側）は緑。マウスを重ねた面の側はオレンジで濃く塗って目立たせる
-        self._draw_band(bd, d, 1, -1, COLOR_ROOT, 170 if hovering_other else 120, "今の起点")
+        self._draw_band(bd, d, 1, -1, COLOR_ROOT, 170 if hovering_other else 120, tr("今の起点", "Current anchor"))
         if hovering_other:
-            self._draw_band(bd, d, self.hover[0], self.hover[1], COLOR_HOVER, 90, "ここを起点に")
+            self._draw_band(bd, d, self.hover[0], self.hover[1], COLOR_HOVER, 90, tr("ここを起点に", "Set anchor here"))
         return c4d.TOOLDRAW_NONE
 
 
@@ -795,69 +810,51 @@ class TypeCommand(plugins.CommandData):
         return True
 
 
-class RefitCommand(plugins.CommandData):
-    def Execute(self, doc):
-        open_panel()
-        do_reorient(doc, core.refit, "選択範囲に合わせ直しました。")
-        return True
-
-
-class FreezeCommand(plugins.CommandData):
-    def Execute(self, doc):
-        open_panel()
-        do_freeze(doc)
-        return True
-
-
 # ---------------------------------------------------------------------------
 # 登録
 # ---------------------------------------------------------------------------
 # メニューは C4D 標準の「拡張」メニュー（プラグインフォルダごとのサブメニュー）に任せる。
 # C4D 2027 の Python では SearchPluginMenuResource() が BaseContainer ではなく PyCapsule を返し、
 # メニューを書き換えられないため、自前のサブメニューは作らない。
+# メニューに出すのはパネルと種類の6個だけ（再フィット・フリーズ・起点はパネルから使う）。
 def register():
     hide = 0
     ok = plugins.RegisterCommandPlugin(
-        core.ID_PANEL, TITLE + "パネル", hide, _icon(c4d.Obend),
-        "選択範囲デフォーマーのパネルを開く", PanelCommand())
+        core.ID_PANEL, TITLE, hide, _icon(c4d.Obend),
+        tr("PartDeform のパネルを開く", "Open the PartDeform panel"), PanelCommand())
     for dtype in core.DEFORMER_TYPES:
         name = c4d.GetObjectName(dtype)
         ok &= plugins.RegisterCommandPlugin(
-            core.CMD_FOR_TYPE[dtype], "選択範囲に%s" % name, hide, _icon(dtype),
-            "選択範囲に合わせて%sデフォーマーを置く（デフォーマー選択中は種類を切り替え）" % name,
+            core.CMD_FOR_TYPE[dtype], tr("選択範囲に%s", "%s to Selection") % name, hide, _icon(dtype),
+            tr("選択範囲に合わせて%sデフォーマーを置く（デフォーマー選択中は種類を切り替え）", "Place a %s deformer fitted to the selection (switches the type when a PartDeform deformer is selected)") % name,
             TypeCommand(dtype))
-    ok &= plugins.RegisterCommandPlugin(
-        core.ID_CMD_REFIT, "選択範囲デフォーマーを再フィット", hide, _icon(13038),
-        "今の向きのまま、選択範囲タグに箱を合わせ直す", RefitCommand())
-    ok &= plugins.RegisterCommandPlugin(
-        core.ID_CMD_FREEZE, "選択範囲デフォーマーをフリーズ", hide, _icon(12233),
-        "変形をポリゴンに書き込み、デフォーマーとプラグイン製の選択範囲タグを消す", FreezeCommand())
     ok &= _register_tool()
     if not ok:
-        print(LOG_PREFIX + "一部のプラグインを登録できませんでした。")
+        print(LOG_PREFIX + tr("一部のプラグインを登録できませんでした。", "Some plugins could not be registered."))
     return ok
 
 
 def _register_tool():
-    name = "選択範囲デフォーマーの起点をクリック"
-    help_text = "クリックした側を起点（効果0）にする"
+    name = tr("PartDeform の起点", "PartDeform Anchor")
+    help_text = tr("クリックした側を起点（効果0）にする", "Click a side to make it the anchor (no effect there)")
     errors = []
-    for info in (0,):
+    # パネルの「起点」ボタンから使うので、拡張メニューには出さない
+    for info in (getattr(c4d, "PLUGINFLAG_HIDEPLUGINMENU", 0), 0):
         try:
             if plugins.RegisterToolPlugin(core.ID_TOOL_PICK, name, info, _icon(12139), help_text, PickRootTool()):
                 if errors:
-                    print(LOG_PREFIX + "起点クリックツール: " + " / ".join(errors))
+                    print(LOG_PREFIX + tr("起点クリックツール: ", "Anchor tool: ") + " / ".join(errors))
                 return True
             errors.append("info=%d: False" % info)
         except Exception as e:  # 登録の失敗理由をコンソールに残す
             errors.append("info=%d: %r" % (info, e))
-    message = "起点クリックツールを登録できませんでした: " + " / ".join(errors)
+    message = tr("起点クリックツールを登録できませんでした: ", "Could not register the anchor tool: ") + " / ".join(errors)
     print(LOG_PREFIX + message)
     try:  # 起動時のコンソールは後から読めないので、一時フォルダにも残す
         import os
         import tempfile
 
-        with open(os.path.join(tempfile.gettempdir(), "seldeform_register.log"), "w", encoding="utf-8") as f:
+        with open(os.path.join(tempfile.gettempdir(), "partdeform_register.log"), "w", encoding="utf-8") as f:
             f.write(message + "\n")
     except Exception:
         pass

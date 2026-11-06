@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""選択範囲デフォーマー: コア処理（Cinema 4D 2027）
+"""PartDeform: コア処理（Cinema 4D 2027）
 
-標準デフォーマー（屈曲・シアー・テーパー・ツイスト・膨張）を、
+標準デフォーマー（屈曲・シアー・テーパー・ツイスト・膨張・ベベル）を、
 選択範囲に合わせた大きさと向きで、編集可能なポリゴンオブジェクトの子に置く。
 
 - 影響範囲は、デフォーマーのフィールドに入れた「変数タグ」レイヤー（FLweight）で、
@@ -18,20 +18,23 @@ import math
 
 import c4d
 
+from .i18n import tr
+
 # ---------------------------------------------------------------------------
-# プラグインID（テスト用 1000001〜1000010。正式登録後に差し替える）
+# プラグインID（Maxon で登録した正式なID。* は取得待ちでテスト用の番号のまま）
 # ---------------------------------------------------------------------------
-ID_PANEL = 1000001
-ID_CMD_BEND = 1000002
-ID_CMD_SHEAR = 1000003
-ID_CMD_TAPER = 1000004
-ID_CMD_TWIST = 1000005
-ID_CMD_BULGE = 1000006
-ID_CMD_REFIT = 1000007
-ID_CMD_FREEZE = 1000008
-ID_TOOL_PICK = 1000009
-ID_MARKER = 1000010  # 印を入れる BaseContainer のキー（プラグインIDとは別の名前空間）
-ID_CMD_BEVEL = 1000010  # テスト用IDが10個しかないので、印のキーと同じ番号を使う（正式ID取得時に分ける）
+ID_PANEL = 1073413  # 本体（パネルを開くコマンド）
+ID_CMD_BEND = 1000002  # *
+ID_CMD_SHEAR = 1000003  # *
+ID_CMD_TAPER = 1000004  # *
+ID_CMD_TWIST = 1000005  # *
+ID_CMD_BULGE = 1000006  # *
+ID_CMD_BEVEL = 1000007  # *
+ID_TOOL_PICK = 1000009  # * 起点クリックのツール（メニューには出さない）
+# 印を入れる BaseContainer のキー。登録済みのIDなら他のプラグインと重ならないので、本体のIDを使う
+ID_MARKER = ID_PANEL
+# 試作版（テスト用ID）で作ったシーンの印のキー。読むときだけ見る（自分の印の形のときだけ印とみなす）
+ID_MARKER_LEGACY = 1000010
 
 # 印（サブコンテナ）の中身
 MK_KIND = 1
@@ -105,7 +108,7 @@ AMOUNT_UNIT = {
 # DEFORMOBJECT_ANGLE が「曲げ・せん断の方向」を表す種類
 DIRECTION_ANGLE_TYPES = (c4d.Obend, c4d.Oshear)
 
-SELTAG_BASENAME = "SD_Sel"
+SELTAG_BASENAME = "PD_Sel"
 
 # 自動判定のしきい値
 COHERENCE_SURFACE = 0.5  # 平均法線の揃い具合。これ以上なら「面」として扱う
@@ -141,6 +144,13 @@ def _marker(node):
     if bc is None:
         return None
     sub = bc.GetContainerInstance(ID_MARKER)
+    if sub is None:
+        # 試作版で作ったデフォーマー／タグ。テスト用IDはほかの開発中のプラグインも使いうるので、
+        # 中身が自分の印の形（種類と版）のときだけ印とみなす
+        old = bc.GetContainerInstance(ID_MARKER_LEGACY)
+        if (old is not None and old.GetInt32(MK_VERSION) == MARKER_VERSION
+                and old.GetInt32(MK_KIND) in (KIND_DEFORMER, KIND_TAG)):
+            sub = old
     return sub
 
 
@@ -205,7 +215,7 @@ def make_field_list(tag):
     fl = c4d.FieldList()
     layer = c4d.modules.mograph.FieldLayer(c4d.FLweight)
     if layer is None or not layer.SetLinkedObject(tag):
-        raise SDError("選択範囲タグをフィールドに入れられませんでした。")
+        raise SDError(tr("選択範囲タグをフィールドに入れられませんでした。", "Could not add the selection tag to the deformer's Fields."))
     fl.InsertLayer(layer)
     return fl
 
@@ -279,7 +289,7 @@ def _setup_bevel(bevel, tag, size_hint=None):
     """ベベルデフォーマーを、選択範囲タグ（名前）と、そのタグの種類に合うコンポーネントモードにする。"""
     mode = BEVEL_MODE_FOR_TAG.get(tag.GetType())
     if mode is None:
-        raise SDError("ベベルに使えない選択範囲タグです。")
+        raise SDError(tr("ベベルに使えない選択範囲タグです。", "This selection tag cannot be used for Bevel."))
     bevel[c4d.O_BEVEL_MODE_COMPONENT_TYPE] = mode
     # 「角度を使う」がオンだと、選んだエッジでも角度が浅いとベベルされないのでオフにする
     bevel[c4d.O_BEVEL_MODE_SELECTION_ANGLE_USE] = False
@@ -309,7 +319,7 @@ def _point_tag_from_edges(doc, mesh, edge_tag):
         if a != b:
             pts.update((a, b))
     if len(pts) < 2:
-        raise SDError("エッジ選択タグ「%s」から点を取り出せませんでした。" % edge_tag.GetName())
+        raise SDError(tr("エッジ選択タグ「%s」から点を取り出せませんでした。", "Could not get points from the edge selection tag \"%s\".") % edge_tag.GetName())
     tag = c4d.SelectionTag(c4d.Tpointselection)
     tag.SetName(_unique_tag_name(mesh, SELTAG_BASENAME))
     bs = tag.GetBaseSelect()
@@ -504,18 +514,18 @@ def selection_from_component_mode(doc, obj):
         flags = bs.GetAll(vcnt)
         poly_ids = [i for i, f in enumerate(flags) if f]
         if not poly_ids:
-            raise SDError("ポリゴンが選択されていません。")
+            raise SDError(tr("ポリゴンが選択されていません。", "No polygons are selected."))
         pts = set()
         for i in poly_ids:
             pts.update(_poly_ids(polys[i]))
-        return c4d.Tpolygonselection, pts, set(poly_ids), "ポリゴン %d 個" % len(poly_ids)
+        return c4d.Tpolygonselection, pts, set(poly_ids), tr("ポリゴン %d 個", "%d polygons") % len(poly_ids)
     if mode == c4d.Mpoints:
         bs = obj.GetPointS()
         flags = bs.GetAll(pcnt)
         pts = set(i for i, f in enumerate(flags) if f)
         if not pts:
-            raise SDError("ポイントが選択されていません。")
-        return c4d.Tpointselection, pts, _polys_inside(polys, pts), "ポイント %d 個" % len(pts)
+            raise SDError(tr("ポイントが選択されていません。", "No points are selected."))
+        return c4d.Tpointselection, pts, _polys_inside(polys, pts), tr("ポイント %d 個", "%d points") % len(pts)
     if mode == c4d.Medges:
         bs = obj.GetEdgeS()
         flags = bs.GetAll(vcnt * 4)
@@ -532,9 +542,9 @@ def selection_from_component_mode(doc, obj):
             pts.update(pair)
             n_edges += 1
         if not pts:
-            raise SDError("エッジが選択されていません。")
-        return c4d.Tpointselection, pts, _polys_inside(polys, pts), "エッジ %d 本" % n_edges
-    raise SDError("ポイント・エッジ・ポリゴンのどれかのモードで、変形したい部分を選択してください。")
+            raise SDError(tr("エッジが選択されていません。", "No edges are selected."))
+        return c4d.Tpointselection, pts, _polys_inside(polys, pts), tr("エッジ %d 本", "%d edges") % n_edges
+    raise SDError(tr("ポイント・エッジ・ポリゴンのどれかのモードで、変形したい部分を選択してください。", "Select the part to deform in Points, Edges or Polygons mode."))
 
 
 def _polys_inside(polys, point_set):
@@ -562,7 +572,7 @@ def selection_from_tag(obj, tag):
         pts = set(i for i, f in enumerate(flags) if f)
         poly_ids = _polys_inside(polys, pts)
     if len(pts) < 2:
-        raise SDError("選択範囲タグ「%s」の中身が空か、少なすぎます。" % tag.GetName())
+        raise SDError(tr("選択範囲タグ「%s」の中身が空か、少なすぎます。", "The selection tag \"%s\" is empty or too small.") % tag.GetName())
     return SelectionInfo(obj, pts, poly_ids)
 
 
@@ -826,7 +836,7 @@ def fit_box(info, axes, dtype):
     sx, sy, sz = hi_x - lo_x, hi_y - lo_y, hi_z - lo_z
     biggest = max(sx, sy, sz)
     if biggest < EPS:
-        raise SDError("選択範囲の大きさが0です。")
+        raise SDError(tr("選択範囲の大きさが0です。", "The selection has zero size."))
     minimum = max(biggest * MIN_SIZE_RATIO, 1e-3)
     sx, sy, sz = max(sx, minimum), max(sy, minimum), max(sz, minimum)
     # どの種類も箱は選択範囲にぴったり（シアーだけ広げることはしない）
@@ -844,10 +854,10 @@ def shear_lever(size, angle):
 
 # 強度（%）を長さに換算して見せる種類と、その量の名前
 LENGTH_AMOUNT_LABEL = {
-    c4d.Oshear: "シアー: 先端のずれ",
-    c4d.Otaper: "テーパー: 先端の片側の絞り",
-    c4d.Obulge: "膨張: 中央の片側のふくらみ",
-    c4d.Obevel: "ベベル: オフセット",
+    c4d.Oshear: tr("シアー: 先端のずれ", "Shear: tip offset"),
+    c4d.Otaper: tr("テーパー: 先端の片側の絞り", "Taper: tip inset (per side)"),
+    c4d.Obulge: tr("膨張: 中央の片側のふくらみ", "Bulge: middle bulge (per side)"),
+    c4d.Obevel: tr("ベベル: オフセット", "Bevel: offset"),
 }
 
 
@@ -920,9 +930,9 @@ def set_amount_length(doc, deformer, value, undo=True):
     _stop_threads()
     lever = amount_lever(deformer) if deformer is not None else None
     if lever is None:
-        raise SDError("シアー・テーパー・膨張・ベベル（比例モード以外）の選択範囲デフォーマーを選択してください。")
+        raise SDError(tr("シアー・テーパー・膨張・ベベル（比例モード以外）のPartDeform のデフォーマーを選択してください。", "Select a PartDeform Shear, Taper, Bulge or Bevel deformer (Bevel: not in Proportional offset mode)."))
     if lever < EPS:
-        raise SDError("箱の幅が0なので、量を決められません。")
+        raise SDError(tr("箱の幅が0なので、量を決められません。", "The deformer box has zero width, so the amount cannot be set."))
     param = length_param(deformer)
     strength = value / lever
     if is_bevel(deformer):
@@ -945,13 +955,13 @@ def set_amount_length(doc, deformer, value, undo=True):
 # ---------------------------------------------------------------------------
 # 1段目を角度で見せる種類（屈曲の強度＝曲げる角度、ツイストの角度＝ひねる角度）
 ANGLE_AMOUNT_LABEL = {
-    c4d.Obend: "屈曲: 強度（曲げる角度）",
-    c4d.Otwist: "ツイスト: 角度（ひねる角度）",
+    c4d.Obend: tr("屈曲: 強度（曲げる角度）", "Bend: strength (bend angle)"),
+    c4d.Otwist: tr("ツイスト: 角度（ひねる角度）", "Twist: angle"),
 }
 # 2段目（DEFORMOBJECT_ANGLE＝曲げ・ずらす向き）を見せる種類
 DIRECTION_LABEL = {
-    c4d.Obend: "屈曲: 角度（曲げる向き）",
-    c4d.Oshear: "シアー: 角度（ずらす向き）",
+    c4d.Obend: tr("屈曲: 角度（曲げる向き）", "Bend: angle (direction)"),
+    c4d.Oshear: tr("シアー: 角度（ずらす向き）", "Shear: angle (direction)"),
 }
 # スライダーの範囲（属性マネージャーと同じ。ツイストは逆向きにもひねれるよう屈曲の強度と同じ ±360°）
 ANGLE_AMOUNT_SLIDER = math.radians(360.0)
@@ -1012,7 +1022,7 @@ def set_direction(doc, deformer, angle, undo=True, keep_shift=None):
     （「起点と方向」のボタンで箱の幅が変わったときと同じ考え方）。新しい向きで幅が0なら強度はそのまま。
     """
     if deformer is None or deformer.GetType() not in DIRECTION_LABEL:
-        raise SDError("屈曲かシアーの選択範囲デフォーマーを選択してください。")
+        raise SDError(tr("屈曲かシアーのPartDeform のデフォーマーを選択してください。", "Select a PartDeform Bend or Shear deformer."))
     values = {c4d.DEFORMOBJECT_ANGLE: angle}
     if deformer.GetType() == c4d.Oshear:
         shift = shear_shift(deformer) if keep_shift is None else keep_shift
@@ -1049,7 +1059,7 @@ def shear_shift(deformer):
 def set_shear_shift(doc, deformer, shift):
     """先端のずれ量を指定して、シアーの強度（%）を逆算して入れる。アンドゥ1回。"""
     if deformer is None or deformer.GetType() != c4d.Oshear:
-        raise SDError("シアーの選択範囲デフォーマーを選択してください。")
+        raise SDError(tr("シアーのPartDeform のデフォーマーを選択してください。", "Select a PartDeform Shear deformer."))
     return set_amount_length(doc, deformer, shift)
 
 
@@ -1112,8 +1122,8 @@ def edit_target(doc):
         if len(ds) == 1:
             return ds[0]
         if len(ds) > 1:
-            raise SDError("「%s」には選択範囲デフォーマーが %d 個あります。どれか1つを選択してください。" % (act[0].GetName(), len(ds)))
-    raise SDError("選択範囲デフォーマーを選択してください。")
+            raise SDError(tr("「%s」にはPartDeform のデフォーマーが %d 個あります。どれか1つを選択してください。", "\"%s\" has %d PartDeform deformers. Select one of them.") % (act[0].GetName(), len(ds)))
+    raise SDError(tr("PartDeform のデフォーマーを選択してください。", "Select a PartDeform deformer."))
 
 
 def freeze_targets(doc):
@@ -1143,7 +1153,7 @@ def freeze_targets(doc):
 def _mesh_of(deformer):
     parent = deformer.GetUp()
     if parent is None or not parent.CheckType(c4d.Opolygon):
-        raise SDError("「%s」の親が編集可能なポリゴンオブジェクトではありません。" % deformer.GetName())
+        raise SDError(tr("「%s」の親が編集可能なポリゴンオブジェクトではありません。", "The parent of \"%s\" is not an editable polygon object.") % deformer.GetName())
     return parent
 
 
@@ -1151,7 +1161,7 @@ def _info_of(deformer):
     mesh = _mesh_of(deformer)
     tag = get_selection_tag(deformer)
     if tag is None:
-        raise SDError("「%s」が使う選択範囲タグが見つかりません（フィールドの変数タグレイヤーに選択範囲タグを入れてください）。" % deformer.GetName())
+        raise SDError(tr("「%s」が使う選択範囲タグが見つかりません（フィールドの変数タグレイヤーに選択範囲タグを入れてください）。", "Cannot find the selection tag used by \"%s\" (put a selection tag into a Variable Tag layer in its Fields).") % deformer.GetName())
     return selection_from_tag(mesh, tag)
 
 
@@ -1179,7 +1189,7 @@ def _deformer_name(dtype, tag_name):
 def _new_deformer(doc, dtype):
     d = c4d.BaseObject(dtype)
     if d is None:
-        raise SDError("デフォーマーを作れませんでした。")
+        raise SDError(tr("デフォーマーを作れませんでした。", "Could not create the deformer."))
     # メニューから作ったときと同じ初期化（フィールドの初期化など）
     d.Message(c4d.MSG_MENUPREPARE, doc)
     if dtype in BOX_TYPES:
@@ -1222,18 +1232,18 @@ def _axes_for(deformer, info):
 def create(doc, dtype):
     """選択中のポリゴンオブジェクトの選択範囲から、デフォーマーを作る。"""
     if dtype not in DEFORMER_TYPES:
-        raise SDError("未対応のデフォーマーです。")
+        raise SDError(tr("未対応のデフォーマーです。", "Unsupported deformer type."))
     _stop_threads()
     act = _active_objects(doc)
     if len(act) != 1:
-        raise SDError("編集可能なポリゴンオブジェクトを1つだけ選択してください。")
+        raise SDError(tr("編集可能なポリゴンオブジェクトを1つだけ選択してください。", "Select exactly one editable polygon object."))
     obj = act[0]
     if not obj.CheckType(c4d.Opolygon):
-        raise SDError("「%s」は編集可能なポリゴンオブジェクトではありません（Cキーで編集可能にしてください）。" % obj.GetName())
+        raise SDError(tr("「%s」は編集可能なポリゴンオブジェクトではありません（Cキーで編集可能にしてください）。", "\"%s\" is not an editable polygon object (press C to make it editable).") % obj.GetName())
 
     tag_type, pts, poly_ids, _desc = selection_from_component_mode(doc, obj)
     if len(pts) < 2:
-        raise SDError("選択範囲が小さすぎます（ポイント2個以上を含めてください）。")
+        raise SDError(tr("選択範囲が小さすぎます（ポイント2個以上を含めてください）。", "The selection is too small (include at least 2 points)."))
     edge_ids = None
     if dtype == c4d.Obevel and doc.GetMode() == c4d.Medges:
         # ベベルはエッジのままで使う（箱の種類は、エッジの点をポイント選択タグにする）
@@ -1279,7 +1289,7 @@ def create(doc, dtype):
 def switch_type(doc, deformer, dtype):
     """プラグイン製デフォーマーを別の種類に入れ替える（箱・向き・タグはそのまま）。"""
     if dtype not in DEFORMER_TYPES:
-        raise SDError("未対応のデフォーマーです。")
+        raise SDError(tr("未対応のデフォーマーです。", "Unsupported deformer type."))
     old_type = deformer.GetType()
     if old_type == dtype:
         return deformer
@@ -1287,7 +1297,7 @@ def switch_type(doc, deformer, dtype):
     mesh = _mesh_of(deformer)
     old_tag = get_selection_tag(deformer)
     if old_tag is None:
-        raise SDError("「%s」が使う選択範囲タグが見つかりません。" % deformer.GetName())
+        raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % deformer.GetName())
 
     doc.StartUndo()
     try:
@@ -1354,12 +1364,12 @@ def add_stacked(doc, deformer, dtype):
     ベベル（エッジ）に箱の種類を重ねるときだけは、エッジの点からポイント選択タグを作る。
     """
     if dtype not in DEFORMER_TYPES:
-        raise SDError("未対応のデフォーマーです。")
+        raise SDError(tr("未対応のデフォーマーです。", "Unsupported deformer type."))
     _stop_threads()
     mesh = _mesh_of(deformer)
     old_tag = get_selection_tag(deformer)
     if old_tag is None:
-        raise SDError("「%s」が使う選択範囲タグが見つかりません。" % deformer.GetName())
+        raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % deformer.GetName())
 
     doc.StartUndo()
     try:
@@ -1430,7 +1440,7 @@ def recapture_selection(doc, deformer):
     dtype = deformer.GetType()
     tag_type, pts, poly_ids, _desc = selection_from_component_mode(doc, mesh)
     if len(pts) < 2:
-        raise SDError("選択範囲が小さすぎます（ポイント2個以上を含めてください）。")
+        raise SDError(tr("選択範囲が小さすぎます（ポイント2個以上を含めてください）。", "The selection is too small (include at least 2 points)."))
     ids = pts
     if dtype == c4d.Obevel and doc.GetMode() == c4d.Medges:
         tag_type = c4d.Tedgeselection
@@ -1502,7 +1512,7 @@ def create_or_switch(doc, dtype, add=False):
 # ---------------------------------------------------------------------------
 def _reorient(doc, deformer, make_axes):
     if is_bevel(deformer):
-        raise SDError("ベベルには箱や向きがありません（選択範囲のエッジ・ポリゴン・ポイントにかかります）。")
+        raise SDError(tr("ベベルには箱や向きがありません（選択範囲のエッジ・ポリゴン・ポイントにかかります）。", "Bevel has no box or direction (it works on the selected edges, polygons or points)."))
     _stop_threads()
     info = _info_of(deformer)
     axes = make_axes(info, _axes_of(deformer))
@@ -1777,14 +1787,14 @@ def _evaluate_only(doc, mesh, deformer):
         doc.ExecutePasses(None, True, True, True, c4d.BUILDFLAGS_NONE)
         cache = mesh.GetDeformCache()
         if cache is None:
-            raise SDError("「%s」の変形結果を取得できませんでした。" % mesh.GetName())
+            raise SDError(tr("「%s」の変形結果を取得できませんでした。", "Could not get the deformed result of \"%s\".") % mesh.GetName())
         pts = cache.GetAllPoints()
     finally:
         for o in others:
             o.SetDeformMode(True)
         deformer.SetDeformMode(was_on)
     if len(pts) != mesh.GetPointCount():
-        raise SDError("「%s」の変形結果のポイント数が元と違います。" % mesh.GetName())
+        raise SDError(tr("「%s」の変形結果のポイント数が元と違います。", "The deformed result of \"%s\" has a different point count.") % mesh.GetName())
     return pts
 
 
@@ -1796,10 +1806,10 @@ def _apply_bevel_tool(doc, mesh, bevel, tag):
     C4D 2027 で、点・エッジ・ポリゴンの3モードともデフォーマーと同じ形になることを確認済み。
     """
     if tag is None:
-        raise SDError("「%s」が使う選択範囲タグが見つかりません。" % bevel.GetName())
+        raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % bevel.GetName())
     mode = bevel[c4d.O_BEVEL_MODE_COMPONENT_TYPE]
     if BEVEL_MODE_FOR_TAG.get(tag.GetType()) != mode:
-        raise SDError("「%s」のコンポーネントモードと、選択範囲タグ「%s」の種類が合いません。" % (bevel.GetName(), tag.GetName()))
+        raise SDError(tr("「%s」のコンポーネントモードと、選択範囲タグ「%s」の種類が合いません。", "The component mode of \"%s\" does not match the type of the selection tag \"%s\".") % (bevel.GetName(), tag.GetName()))
     selection = {0: mesh.GetPointS, 1: mesh.GetEdgeS, 2: mesh.GetPolygonS}[mode]()
     doc.AddUndo(c4d.UNDOTYPE_CHANGE, mesh)
     tag.GetBaseSelect().CopyTo(selection)
@@ -1816,7 +1826,7 @@ def _apply_bevel_tool(doc, mesh, bevel, tag):
             bc.SetData(pid, value)
     ok = c4d.utils.SendModelingCommand(c4d.ID_XBEVELTOOL, [mesh], BEVEL_TOOL_MODE[mode], bc, doc)
     if not ok:
-        raise SDError("「%s」を焼き込めませんでした（ベベルツールが失敗しました）。" % bevel.GetName())
+        raise SDError(tr("「%s」を焼き込めませんでした（ベベルツールが失敗しました）。", "Could not bake \"%s\" (the Bevel tool failed).") % bevel.GetName())
     mesh.Message(c4d.MSG_UPDATE)
 
 
@@ -1833,7 +1843,7 @@ def freeze(doc, deformers):
     """デフォーマーの変形を元のポリゴンに書き込み、デフォーマーとプラグイン製タグを消す。
     オブジェクトは作り直さないので、タグ・マテリアル・UV・階層はそのまま残る。アンドゥは1回。"""
     if not deformers:
-        raise SDError("フリーズする選択範囲デフォーマーがありません。デフォーマーか、その親のオブジェクトを選択してください。")
+        raise SDError(tr("フリーズするPartDeform のデフォーマーがありません。デフォーマーか、その親のオブジェクトを選択してください。", "No PartDeform deformer to freeze. Select a deformer or its parent object."))
     for d in deformers:
         _mesh_of(d)
     _stop_threads()
@@ -1869,37 +1879,3 @@ def freeze(doc, deformers):
         doc.EndUndo()
     c4d.EventAdd()
     return meshes
-
-
-# ---------------------------------------------------------------------------
-# パネルの表示用
-# ---------------------------------------------------------------------------
-def describe(doc):
-    """パネルに出す「今の対象」の説明。"""
-    if doc is None:
-        return "ドキュメントがありません。"
-    d = active_sd_deformer(doc)
-    if d is not None:
-        mesh = d.GetUp()
-        text = "対象: %s（%s）" % (d.GetName(), mesh.GetName() if mesh else "-")
-        if mesh is not None and affected_children(mesh):
-            text += " ⚠子オブジェクトも変形"
-        return text
-    act = _active_objects(doc)
-    if len(act) == 1 and act[0].CheckType(c4d.Opolygon):
-        obj = act[0]
-        mode = doc.GetMode()
-        count, unit = 0, ""
-        if mode == c4d.Mpolygons:
-            count, unit = obj.GetPolygonS().GetCount(), "ポリゴン %d 個"
-        elif mode == c4d.Mpoints:
-            count, unit = obj.GetPointS().GetCount(), "ポイント %d 個"
-        elif mode == c4d.Medges:
-            count, unit = obj.GetEdgeS().GetCount(), "エッジ %d 本"
-        if count:
-            return "作成: %s の%s" % (obj.GetName(), unit % count)
-        n = len(sd_deformers_under(obj))
-        if n:
-            return "%s（選択範囲デフォーマー %d 個）" % (obj.GetName(), n)
-        return "%s: 変形したい部分を選択してください。" % obj.GetName()
-    return "ポリゴンオブジェクトの一部を選択してください。"

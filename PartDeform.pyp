@@ -1,9 +1,14 @@
 # -*- coding: utf-8 -*-
-"""選択範囲デフォーマー（Selection Deformer） for Cinema 4D 2027
+"""PartDeform for Cinema 4D
 
 ポリゴン・ポイント・エッジを選んだ状態から、標準デフォーマー
-（屈曲・シアー・テーパー・ツイスト・膨張）を、選択範囲に合わせた
+（屈曲・シアー・テーパー・ツイスト・膨張・ベベル）を、選択範囲に合わせた
 大きさと向きで1クリックでセットする。フリーズで変形を確定できる。
+
+Select polygons, points or edges and place a standard deformer
+(Bend, Shear, Taper, Twist, Bulge, Bevel) fitted to the selection in one click.
+
+Copyright (c) 2026 Taichi Teramura. MIT License (see LICENSE).
 """
 import os
 import sys
@@ -14,7 +19,7 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 if _DIR not in sys.path:
     sys.path.insert(0, _DIR)
 
-from seldeform import ui  # noqa: E402
+from partdeform import ui  # noqa: E402
 
 
 if __name__ == "__main__":

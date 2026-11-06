@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""選択範囲デフォーマーの通しテスト（C4D 2027 のスクリプトマネージャーで実行）。
+"""PartDeform の通しテスト（C4D 2027 のスクリプトマネージャーで実行）。
 
 新しいドキュメントを作り、3パターン（突起・平らな面・エッジ選択）で
 登録済みのコマンドを呼んで、作成（フィールドで限定）・保存→再読込・種類の切り替え・
@@ -12,7 +12,7 @@ import tempfile
 
 import c4d
 
-from seldeform import core
+from partdeform import core, i18n, ui
 
 RESULTS = []
 
@@ -185,7 +185,7 @@ def test_face_shear(doc):
     shift = max_shift(doc, cube, before)
     check("FaceShear: ずれ量は長さの約20%", abs(shift - 0.2 * size.y) < 0.05 * size.y, "%.2f / %.2f" % (shift, size.y))
 
-    c4d.CallCommand(core.ID_CMD_REFIT)
+    ui.do_reorient(doc, core.refit, None)  # パネルの「フィット」と同じ処理
     shift_refit = max_shift(doc, cube, before)
     check("FaceShear: 再フィットでずれ量が変わらない", abs(shift_refit - shift) < 1e-3, "%.3f -> %.3f" % (shift, shift_refit))
     core.rotate90(doc, core.active_sd_deformer(doc))
@@ -353,7 +353,7 @@ def test_add_stacked(doc):
     check("AddStacked: 追加したものが選択される", core.active_sd_deformer(doc) == ds[1])
     expected = deformed_points(doc, cube)
     doc.SetActiveObject(cube, c4d.SELECTION_NEW)
-    c4d.CallCommand(core.ID_CMD_FREEZE)
+    ui.do_freeze(doc)  # パネルの「フリーズ」と同じ処理
     cube = doc.SearchObject("AddStacked")
     frozen = cube.GetAllPoints()
     check("AddStacked: フリーズで両方の変形が焼き込まれる", max_diff(frozen, expected) < 1e-3, "%.5f" % max_diff(frozen, expected))
@@ -368,7 +368,7 @@ def test_panel_rows(doc):
     """パネルの数値欄: 屈曲・ツイストは1段目（量）が角度、屈曲・シアーは2段目（方向）に角度。
     シアーは向きを変えても先端のずれ量を保つ。どれもアンドゥ1回で戻る。"""
     print("--- PanelRows ---")
-    from seldeform import ui
+
     cube = c4d.BaseObject(c4d.Ocube)
     cube[c4d.PRIM_CUBE_LEN] = c4d.Vector(200)
     cube[c4d.PRIM_CUBE_SUBX] = cube[c4d.PRIM_CUBE_SUBY] = cube[c4d.PRIM_CUBE_SUBZ] = 4
@@ -495,6 +495,48 @@ def test_pick_hit(doc):
     fallback = core.face_from_view(d, bd, far.x, far.y)
     check("PickHit: メッシュの外では None（モードを抜ける）、従来の判定では端が決まる", off is None and fallback is not None,
           "%s / %s" % (off, fallback))
+
+
+def test_legacy_marker_and_language(doc):
+    """試作版（テスト用ID 1000010 の印）で作ったデフォーマーも PartDeform のデフォーマーとして扱える。
+    表示言語の切り替え（日本語／英語）が効く。"""
+    print("--- LegacyAndLanguage ---")
+    cube = c4d.BaseObject(c4d.Ocube)
+    cube[c4d.PRIM_CUBE_SUBX] = cube[c4d.PRIM_CUBE_SUBY] = cube[c4d.PRIM_CUBE_SUBZ] = 2
+    cube.SetName("Legacy")
+    cube = make_editable(doc, cube)
+    doc.SetActiveObject(cube, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Mpolygons)
+    select_polys(cube, lambda c: c.y > 99)
+    c4d.CallCommand(core.ID_CMD_TWIST)
+    d = core.active_sd_deformer(doc)
+    tag = core.get_selection_tag(d)
+    # 印を試作版のキーへ移す（試作版で保存したシーンと同じ状態）
+    for node in (d, tag):
+        bc = node.GetDataInstance()
+        sub = bc.GetContainer(core.ID_MARKER)
+        bc.RemoveData(core.ID_MARKER)
+        bc.SetContainer(core.ID_MARKER_LEGACY, sub)
+    check("Legacy: 試作版の印のデフォーマーも扱える",
+          core.is_sd_deformer(d) and core.is_marked(tag, core.KIND_TAG) and core.sd_deformers_under(cube) == [d])
+    # 試作版の印と同じキーでも、中身が自分の印の形でなければ印とみなさない
+    other = c4d.BaseObject(c4d.Obend)
+    bc = other.GetDataInstance()
+    foreign = c4d.BaseContainer()
+    foreign.SetInt32(1, 5)
+    bc.SetContainer(core.ID_MARKER_LEGACY, foreign)
+    check("Legacy: 他のプラグインのデータは印とみなさない", not core.is_sd_deformer(other))
+
+    detected = i18n.language()
+    try:
+        i18n.set_language("en")
+        en = i18n.tr("起点", "Anchor")
+        i18n.set_language("ja")
+        ja = i18n.tr("起点", "Anchor")
+    finally:
+        i18n.set_language(None)
+    check("Language: 日本語／英語を切り替えられる（今の C4D の表示言語: %s）" % detected,
+          en == "Anchor" and ja == "起点" and detected in i18n.LANGUAGES and i18n.language() == detected)
 
 
 def sorted_points(pts):
@@ -642,13 +684,13 @@ def run_pattern(doc, name, mode, select, create_cmd, switch_cmd, expect_y, expec
 
     # 再フィット（向きを保ったまま箱が変わらない）
     m2, s2 = d2.GetMl(), d2[c4d.DEFORMOBJECT_SIZE]
-    c4d.CallCommand(core.ID_CMD_REFIT)
+    ui.do_reorient(doc, core.refit, None)  # パネルの「フィット」と同じ処理
     d3 = core.active_sd_deformer(doc)
     check(name + ": 再フィット", (d3.GetMl().off - m2.off).GetLength() < 1e-6 and (d3[c4d.DEFORMOBJECT_SIZE] - s2).GetLength() < 1e-6)
 
     # フリーズ
     expected = deformed_points(doc, obj)
-    c4d.CallCommand(core.ID_CMD_FREEZE)
+    ui.do_freeze(doc)  # パネルの「フリーズ」と同じ処理
     after = snapshot(doc, name)
     check(name + ": フリーズ後の形＝変形結果", max_diff(after["points"], expected) < 1e-4, "%.6f" % max_diff(after["points"], expected))
     check(name + ": フリーズでデフォーマーが消える", after["children"] == before["children"], str(after["children"]))
@@ -663,13 +705,13 @@ def run_pattern(doc, name, mode, select, create_cmd, switch_cmd, expect_y, expec
           "diff=%.6f deformers=%d" % (max_diff(back["points"], before["points"]), len(core.sd_deformers_under(obj_back))))
     # もう一度フリーズして確定状態で残す
     doc.SetActiveObject(obj_back, c4d.SELECTION_NEW)
-    c4d.CallCommand(core.ID_CMD_FREEZE)
+    ui.do_freeze(doc)  # パネルの「フリーズ」と同じ処理
 
 
 def main(keep_document=False):
     previous = c4d.documents.GetActiveDocument()
     doc = c4d.documents.BaseDocument()
-    doc.SetDocumentName("sd_command_test")
+    doc.SetDocumentName("partdeform_test")
     c4d.documents.InsertBaseDocument(doc)
     c4d.documents.SetActiveDocument(doc)
     doc = c4d.documents.GetActiveDocument()
@@ -708,6 +750,7 @@ def _run_all(doc):
     test_bevel(doc)
     test_panel_rows(doc)
     test_pick_hit(doc)
+    test_legacy_marker_and_language(doc)
 
 
 if __name__ == "__main__":
