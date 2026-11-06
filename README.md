@@ -23,8 +23,7 @@ and **Freeze** the result into the mesh when you are done.
 
 **A helper, not a dependency.** PartDeform only builds a standard Cinema 4D setup — a deformer, a selection tag and Fields,
 exactly what you could build by hand. Everything that actually deforms your mesh is a native Cinema 4D feature,
-so your scenes open and render the same on any machine or render farm without the plugin,
-and after **Freeze** nothing PartDeform made is left in the scene.
+so your scenes open and render the same on any machine or render farm, with or without the plugin.
 
 - Free and open source ([MIT License](LICENSE)): anyone can copy, share and modify it.
 - English and Japanese UI (Japanese when Cinema 4D runs in Japanese, English otherwise).
@@ -111,7 +110,7 @@ Bevel works differently from the other five (it cuts corners and adds faces, so 
 
 - PartDeform creates only standard objects: the deformer, the selection tag and a Fields layer. To recognize its own deformers later
   (switching the type, Update Selection, Freeze), it stores a small ID in their data; Cinema 4D simply ignores it when the plugin
-  is not installed, and it disappears together with the deformer and the tag when you Freeze.
+  is not installed.
 - The effect is limited with a Variable Tag layer in the deformer's **Fields**, pointing to the selection tag (`PD_Sel`, `PD_Sel.1`, ...).
   This is the same as dragging the selection tag into the Fields yourself, so you can add falloff fields on top.
 - The bottom of the box (local -Y) has no effect and the top has the full effect (Bulge: both ends have no effect). The bottom is placed at the anchor of the selection.
