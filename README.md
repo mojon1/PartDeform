@@ -64,6 +64,8 @@ You can assign the commands to shortcuts or palettes in the Command Manager.
 - With a PartDeform deformer selected, a type button **switches the type** and keeps the box and the direction.
 - **Shift+click** a type button to **stack** a new deformer on the same selection and direction (for example Taper + Twist).
   While you hold Shift over the panel, a green + appears on the icons.
+- To bend the middle of a pipe and let the rest follow, turn off **Limit to Selection** in the panel.
+  Unselected parts then deform like with a standard deformer, and the part beyond the box follows without changing shape.
 ![Anchor mode: green = current anchor, orange = the side you are about to set](docs/images/anchor_en.png)
 
 *Anchor mode: the green band is the current anchor, the orange band is the side you would set by clicking.*
@@ -75,6 +77,7 @@ You can assign the commands to shortcuts or palettes in the Command Manager.
 | Item | What it does |
 |---|---|
 | Bend ... Bevel | Creates a deformer on a selected mesh; switches the type on a selected PartDeform deformer; Shift+click stacks another one |
+| Limit to Selection | **On (default)**: only the selected part deforms. **Off**: the Variable Tag layer in the Fields is disabled, so the deformer works like a standard one (unselected parts inside the box deform too, and with Bend the part beyond the box follows the bend). Shows and switches the selected PartDeform deformer (one undo step), and is also the setting for new deformers (kept after you quit Cinema 4D). Not used for Bevel |
 | Value field (1st row) | **Bend: strength (bend angle), Twist: angle** as angles. **Shear: tip offset, Taper: tip inset per side, Bulge: middle bulge per side, Bevel: offset** as real lengths (the strength % is calculated for you). Uses your Cinema 4D unit settings |
 | Value field (2nd row) | **Bend / Shear angle (direction)**. For Shear, the strength is recalculated so the tip offset (length) stays the same |
 | Anchor | Anchor mode: click a side of the object in the viewport to make it the anchor. Keep clicking to switch. Green band = current anchor, orange band = the side you would set. Click outside the object, press Anchor again, press another button, or Esc to finish |
@@ -113,12 +116,13 @@ Bevel works differently from the other five (it cuts corners and adds faces, so 
   is not installed.
 - The effect is limited with a Variable Tag layer in the deformer's **Fields**, pointing to the selection tag (`PD_Sel`, `PD_Sel.1`, ...).
   This is the same as dragging the selection tag into the Fields yourself, so you can add falloff fields on top.
+  Turning off Limit to Selection disables this layer. The layer and the tag stay, so enabling it again in the Attribute Manager does the same.
 - The bottom of the box (local -Y) has no effect and the top has the full effect (Bulge: both ends have no effect). The bottom is placed at the anchor of the selection.
 
 ## Notes
 
 - **Child objects of the mesh are deformed too.** A Variable Tag field layer returns full weight for objects without the tag (standard Cinema 4D behavior). A warning is shown in the status bar when the deformer is created. Freeze bakes only the mesh.
-- If both ends of the selection connect to unselected parts, the border at the tip side shows a step or distortion (standard deformer behavior).
+- If both ends of the selection connect to unselected parts, the border at the tip side shows a step or distortion (because the effect is limited by the Fields). Turn off Limit to Selection to let the rest follow.
 - Shear strength is a percentage of the box width (Cinema 4D's definition), so shearing a flat face along its normal needs several hundred %. The panel shows the real offset as a length.
 - Switching the type does not carry over keyframes on the deformer itself.
 - Meshes with a Normal tag (explicit normals) keep the old normals after Freeze.

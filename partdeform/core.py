@@ -9,6 +9,8 @@
   注意: FLweight は、そのタグを持たないオブジェクト（メッシュの子など）には重み1を返すので、
   メッシュに子オブジェクトがあると子まで変形する（C4D 標準の挙動）。affected_children() で検出して知らせる。
   昔の「制限」タグはレガシー扱いなので使わない（旧版で作ったデフォーマーの読み取りだけ対応）。
+  「選択範囲に限定」をオフにすると、このレイヤーの「有効」をオフにする（レイヤーとタグは残す）。
+  フィールドが効かないので標準のデフォーマーと同じ動きになり、パイプの一部を曲げると先の部分も付いてくる。
 - 標準デフォーマーは箱の底面（ローカル -Y）で効果0、上面で最大（膨張は両端0）。
   そこで箱の底面を選択範囲の「起点」に合わせる。
 - プラグインが作ったデフォーマー／タグには、BaseContainer の ID_MARKER に印を残す。
@@ -210,14 +212,88 @@ def weight_layer_targets(deformer, doc=None):
     return [l.GetLinkedObject(doc) for l in _iter_layers(root.GetDown()) if l.GetType() == c4d.FLweight]
 
 
-def make_field_list(tag):
-    """選択範囲タグを入れた「変数タグ」レイヤーだけのフィールドリスト。"""
-    fl = c4d.FieldList()
+def _new_weight_layer(tag, enabled=True):
     layer = c4d.modules.mograph.FieldLayer(c4d.FLweight)
     if layer is None or not layer.SetLinkedObject(tag):
         raise SDError(tr("選択範囲タグをフィールドに入れられませんでした。", "Could not add the selection tag to the deformer's Fields."))
-    fl.InsertLayer(layer)
+    layer.SetChannelFlag(c4d.FIELDLAYER_CHANNELFLAG_ENABLE, bool(enabled))
+    return layer
+
+
+def make_field_list(tag, limit=True):
+    """選択範囲タグを入れた「変数タグ」レイヤーだけのフィールドリスト。
+
+    limit=False（選択範囲に限定しない）でもレイヤーは入れ、「有効」をオフにしておく。
+    タグとのつながりが残るので、あとから属性マネージャーやパネルでオンにでき、
+    種類の切り替え・選択の取り直し・フリーズもいつもどおりタグを見つけられる。
+    """
+    fl = c4d.FieldList()
+    fl.InsertLayer(_new_weight_layer(tag, limit))
     return fl
+
+
+def _weight_layers(fl, tag, doc):
+    """フィールドリスト fl の中で tag を指している変数タグレイヤー（fl が生きている間だけ使える）。"""
+    root = fl.GetLayersRoot() if fl is not None else None
+    if root is None:
+        return []
+    return [l for l in _iter_layers(root.GetDown()) if l.GetType() == c4d.FLweight and l.GetLinkedObject(doc) == tag]
+
+
+def selection_limit(deformer):
+    """箱の種類のデフォーマーが選択範囲に限定しているか（True / False）。
+
+    選択範囲タグを指す変数タグレイヤーが1つでも有効なら True。レイヤーが無い・すべて無効なら False
+    （フィールドが効かないので、箱の中はすべて変形し、箱の外は標準のデフォーマーと同じ動きになる）。
+    ベベル（名前で限定する）や、タグが見つからないものは None（切り替えられない）。
+    """
+    if deformer is None or deformer.GetType() not in BOX_TYPES:
+        return None
+    doc = deformer.GetDocument()
+    tag = get_selection_tag(deformer)
+    if tag is None:
+        return None
+    fl = deformer[c4d.FIELDS]
+    return any(l.GetChannelFlag(c4d.FIELDLAYER_CHANNELFLAG_ENABLE) for l in _weight_layers(fl, tag, doc))
+
+
+def set_selection_limit(doc, deformer, on, undo=True):
+    """「選択範囲に限定」のオン／オフ。変数タグレイヤーの「有効」を切り替える（レイヤーは消さない）。
+
+    レイヤーが無いのにオンにしたときは、選択範囲タグのレイヤーをいちばん上に足す
+    （ユーザーが足したぼかし等のレイヤーは残す）。アンドゥ1回。
+    """
+    if is_bevel(deformer):
+        raise SDError(tr("ベベルは「選択範囲」欄のタグ名で限定するので、この切り替えはありません。",
+                         "Bevel is limited by the tag name in its Selection field, so this option does not apply."))
+    if deformer is None or deformer.GetType() not in BOX_TYPES:
+        raise SDError(tr("PartDeform のデフォーマーを選択してください。", "Select a PartDeform deformer."))
+    tag = get_selection_tag(deformer)
+    if tag is None:
+        raise SDError(tr("「%s」が使う選択範囲タグが見つかりません。", "Cannot find the selection tag used by \"%s\".") % deformer.GetName())
+    _stop_threads()
+    fl = deformer[c4d.FIELDS]
+    layers = _weight_layers(fl, tag, doc)
+    if not layers and not on:
+        return deformer  # もともと何も限定していない
+    if undo:
+        doc.StartUndo()
+        doc.AddUndo(c4d.UNDOTYPE_CHANGE, deformer)
+    try:
+        if layers:
+            for l in layers:
+                l.SetChannelFlag(c4d.FIELDLAYER_CHANNELFLAG_ENABLE, bool(on))
+        elif fl is None:
+            fl = make_field_list(tag)
+        else:
+            fl.InsertLayer(_new_weight_layer(tag))
+        deformer[c4d.FIELDS] = fl
+        deformer.Message(c4d.MSG_UPDATE)
+    finally:
+        if undo:
+            doc.EndUndo()
+    c4d.EventAdd()
+    return deformer
 
 
 def _legacy_restriction_tag(deformer):
@@ -1204,8 +1280,11 @@ def _usable_tag(doc, mesh, tag, dtype):
     return tag
 
 
-def _configure(new, dtype, tag, info, axes, amount=None, fields=None):
-    """新しいデフォーマーに選択範囲・箱・強さを入れ、ローカル行列を返す（挿入前に呼ぶ）。"""
+def _configure(new, dtype, tag, info, axes, amount=None, fields=None, limit=True):
+    """新しいデフォーマーに選択範囲・箱・強さを入れ、ローカル行列を返す（挿入前に呼ぶ）。
+
+    fields を渡さないときは、選択範囲タグのレイヤーを入れる（limit=False なら「有効」オフで）。
+    """
     if dtype == c4d.Obevel:
         _setup_bevel(new, tag, _selection_size(info))
         if amount is not None:
@@ -1218,7 +1297,7 @@ def _configure(new, dtype, tag, info, axes, amount=None, fields=None):
         angle = new[c4d.DEFORMOBJECT_ANGLE] if dtype in DIRECTION_ANGLE_TYPES else 0.0
         amount = default_amount(dtype, size, angle or 0.0)
     new[AMOUNT_PARAM[dtype]] = amount
-    new[c4d.FIELDS] = fields if fields is not None else make_field_list(tag)
+    new[c4d.FIELDS] = fields if fields is not None else make_field_list(tag, limit)
     return mat
 
 
@@ -1229,8 +1308,11 @@ def _axes_for(deformer, info):
     return auto_frame(info)
 
 
-def create(doc, dtype):
-    """選択中のポリゴンオブジェクトの選択範囲から、デフォーマーを作る。"""
+def create(doc, dtype, limit=True):
+    """選択中のポリゴンオブジェクトの選択範囲から、デフォーマーを作る。
+
+    limit=False: 選択範囲に限定しない（フィールドのレイヤーは「有効」オフで入れる）。ベベルは常に限定。
+    """
     if dtype not in DEFORMER_TYPES:
         raise SDError(tr("未対応のデフォーマーです。", "Unsupported deformer type."))
     _stop_threads()
@@ -1272,7 +1354,7 @@ def create(doc, dtype):
 
         d = _new_deformer(doc, dtype)
         d.SetName(_deformer_name(dtype, tag.GetName()))
-        mat = _configure(d, dtype, tag, info, axes)
+        mat = _configure(d, dtype, tag, info, axes, limit=limit)
         _set_marker(d, KIND_DEFORMER, tag)
         d.InsertUnderLast(obj)
         d.SetMl(mat)
@@ -1286,8 +1368,12 @@ def create(doc, dtype):
     return d
 
 
-def switch_type(doc, deformer, dtype):
-    """プラグイン製デフォーマーを別の種類に入れ替える（箱・向き・タグはそのまま）。"""
+def switch_type(doc, deformer, dtype, limit=True):
+    """プラグイン製デフォーマーを別の種類に入れ替える（箱・向き・タグはそのまま）。
+
+    箱の種類同士はフィールドごと引き継ぐので「選択範囲に限定」もそのまま。
+    ベベルから箱の種類にするときだけ、limit で限定するかを決める。
+    """
     if dtype not in DEFORMER_TYPES:
         raise SDError(tr("未対応のデフォーマーです。", "Unsupported deformer type."))
     old_type = deformer.GetType()
@@ -1328,7 +1414,7 @@ def switch_type(doc, deformer, dtype):
         # 強さ: 単位が同じなら引き継ぐ。違えば初期値
         amount = deformer[AMOUNT_PARAM[old_type]] if AMOUNT_UNIT[old_type] == AMOUNT_UNIT[dtype] else None
         # 旧版でシアーだけ広げていた箱も直るように、今の向きのまま箱を合わせ直す
-        mat = _configure(new, dtype, tag, info, _axes_for(deformer, info), amount, fields)
+        mat = _configure(new, dtype, tag, info, _axes_for(deformer, info), amount, fields, limit)
         new.SetDeformMode(deformer.GetDeformMode())
         layer = deformer.GetLayerObject(doc)
         if layer is not None:
@@ -1356,12 +1442,13 @@ def switch_type(doc, deformer, dtype):
     return new
 
 
-def add_stacked(doc, deformer, dtype):
+def add_stacked(doc, deformer, dtype, limit=True):
     """deformer と同じ選択範囲・同じ向きで、dtype のデフォーマーをすぐ後ろに重ねて追加する。
 
     選択範囲タグは共有する（フリーズは、どのデフォーマーにも使われなくなったときにタグを消す）。
     フィールドは元のデフォーマーのものを写すので、ぼかし等を足していればそれも同じになる。
     ベベル（エッジ）に箱の種類を重ねるときだけは、エッジの点からポイント選択タグを作る。
+    「選択範囲に限定」は元のデフォーマーのフィールドと同じ。ベベルに重ねるときだけ limit で決める。
     """
     if dtype not in DEFORMER_TYPES:
         raise SDError(tr("未対応のデフォーマーです。", "Unsupported deformer type."))
@@ -1382,7 +1469,7 @@ def add_stacked(doc, deformer, dtype):
             fl = deformer[c4d.FIELDS]
             if fl is not None and tag in weight_layer_targets(deformer, doc):
                 fields = fl
-        mat = _configure(new, dtype, tag, info, _axes_for(deformer, info), None, fields)
+        mat = _configure(new, dtype, tag, info, _axes_for(deformer, info), None, fields, limit)
         _set_marker(new, KIND_DEFORMER, tag)
 
         new.InsertAfter(deformer)
@@ -1493,18 +1580,19 @@ def recapture_selection(doc, deformer):
     return deformer, tag
 
 
-def create_or_switch(doc, dtype, add=False):
+def create_or_switch(doc, dtype, add=False, limit=True):
     """パネル・メニューの種類ボタン。
 
     デフォーマー選択中: 通常は種類の切り替え、add=True（Shift＋クリック）なら同じ選択範囲に重ねて追加。
     それ以外: 選択範囲から作成。
+    limit: 新しく選択範囲タグのレイヤーを入れるとき（作成、ベベルから箱の種類へ）に限定するか。
     """
     d = active_sd_deformer(doc)
     if d is not None:
         if add:
-            return add_stacked(doc, d, dtype), "add"
-        return switch_type(doc, d, dtype), "switch"
-    return create(doc, dtype), "create"
+            return add_stacked(doc, d, dtype, limit), "add"
+        return switch_type(doc, d, dtype, limit), "switch"
+    return create(doc, dtype, limit), "create"
 
 
 # ---------------------------------------------------------------------------

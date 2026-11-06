@@ -364,6 +364,123 @@ def test_add_stacked(doc):
     check("AddStacked: アンドゥ1回で2つとも戻る", len(core.sd_deformers_under(cube)) == 2)
 
 
+def _local_y(d, mesh, pts):
+    """mesh のポイント（ローカル）を、デフォーマーの箱のローカル Y にする。"""
+    m = ~d.GetMg() * mesh.GetMg()
+    return [(m * p).y for p in pts]
+
+
+def test_selection_limit(doc):
+    """「選択範囲に限定」のオン／オフ: オフは変数タグレイヤーを「有効」オフで残し、標準のデフォーマーと同じ動き
+    （パイプの真ん中を曲げると、箱の先の部分も形を保ったまま付いてくる）。切り替え・重ね・取り直し・フリーズでも保つ。"""
+    print("--- SelectionLimit ---")
+    pipe = c4d.BaseObject(c4d.Ocylinder)
+    pipe[c4d.PRIM_CYLINDER_RADIUS] = 20
+    pipe[c4d.PRIM_CYLINDER_HEIGHT] = 400
+    pipe[c4d.PRIM_CYLINDER_HSUB] = 40
+    pipe[c4d.PRIM_CYLINDER_SEG] = 12
+    pipe[c4d.PRIM_CYLINDER_CAPS] = False
+    pipe.SetName("LimitPipe")
+    pipe = make_editable(doc, pipe)
+    pipe.SetRelPos(c4d.Vector(0, 0, 1200))
+    doc.SetActiveObject(pipe, c4d.SELECTION_NEW)
+    doc.SetMode(c4d.Mpolygons)
+    select_polys(pipe, lambda c: abs(c.y) < 50)  # 真ん中の帯（両端とも選択していない部分につながる）
+    rest = pipe.GetAllPoints()
+
+    d = core.create(doc, c4d.Obend, limit=False)
+    tag = core.get_selection_tag(d)
+    fl = d[c4d.FIELDS]
+    layers = core._weight_layers(fl, tag, doc)
+    check("SelectionLimit: オフでも変数タグレイヤーは入る（有効はオフ）",
+          len(layers) == 1 and not layers[0].GetChannelFlag(c4d.FIELDLAYER_CHANNELFLAG_ENABLE))
+    check("SelectionLimit: オフの状態を読める", core.selection_limit(d) is False)
+    check("SelectionLimit: タグは見つかる", tag is not None and tag.GetObject() == pipe)
+
+    size_y = d[c4d.DEFORMOBJECT_SIZE].y
+    ys = _local_y(d, pipe, rest)
+    eps = 1.0
+    below = [i for i, y in enumerate(ys) if y < -size_y / 2 - eps]  # 起点側（箱の底より下）
+    above = [i for i, y in enumerate(ys) if y > size_y / 2 + eps]  # 先端側（箱の上より先）
+    check("SelectionLimit: 箱の上下に選択していない部分がある", len(below) > 20 and len(above) > 20, "%d / %d" % (len(below), len(above)))
+
+    def moved(pts, ids):
+        return max((pts[i] - rest[i]).GetLength() for i in ids)
+
+    def rigid(pts, ids):
+        # 先の部分が形を保ったまま動いたか（2点間の距離が変わらない）
+        a, b, c_ = ids[0], ids[len(ids) // 2], ids[-1]
+        return max(abs((pts[x] - pts[y]).GetLength() - (rest[x] - rest[y]).GetLength()) for x, y in ((a, b), (b, c_), (a, c_)))
+
+    off_pts = deformed_points(doc, pipe)
+    check("SelectionLimit: オフ: 起点側は動かない", moved(off_pts, below) < 1e-3, "%.5f" % moved(off_pts, below))
+    check("SelectionLimit: オフ: 先の部分も付いてくる", moved(off_pts, above) > 10.0, "%.3f" % moved(off_pts, above))
+    check("SelectionLimit: オフ: 先の部分は形を保つ", rigid(off_pts, above) < 1e-2, "%.5f" % rigid(off_pts, above))
+
+    core.set_selection_limit(doc, d, True)
+    on_pts = deformed_points(doc, pipe)
+    check("SelectionLimit: オン: 状態を読める", core.selection_limit(d) is True)
+    check("SelectionLimit: オン: 先の部分は動かない（選択範囲だけ）", moved(on_pts, above) < 1e-3, "%.5f" % moved(on_pts, above))
+    c4d.StopAllThreads()
+    doc.DoUndo()
+    d = core.sd_deformers_under(doc.SearchObject("LimitPipe"))[0]
+    check("SelectionLimit: アンドゥ1回でオフに戻る", core.selection_limit(d) is False)
+
+    # パネルのチェック（デフォーマー選択中）: そのデフォーマーを切り替え、既定値にもなる
+    saved_default = ui.limit_default()
+    try:
+        doc.SetActiveObject(d, c4d.SELECTION_NEW)
+        ui.do_limit(doc, True)
+        check("SelectionLimit: パネル: 選択中のデフォーマーがオンになる", core.selection_limit(d) is True)
+        check("SelectionLimit: パネル: 既定値もオンになる", ui.limit_default() is True)
+        ui.do_limit(doc, False)
+        check("SelectionLimit: パネル: もう一度でオフ", core.selection_limit(d) is False and ui.limit_default() is False)
+
+        # 切り替え・重ねても状態を引き継ぐ（フィールドごと写す）
+        tw = core.switch_type(doc, d, c4d.Otwist)
+        check("SelectionLimit: 種類を切り替えてもオフのまま", core.selection_limit(tw) is False)
+        st = core.add_stacked(doc, tw, c4d.Otaper)
+        check("SelectionLimit: 重ねたものもオフ", core.selection_limit(st) is False)
+
+        # 選択を取り直してもオフのまま（レイヤーのリンクだけ付け替える）
+        pipe = doc.SearchObject("LimitPipe")
+        select_polys(pipe, lambda c: abs(c.y) < 80)
+        doc.SetActiveObject(tw, c4d.SELECTION_NEW)
+        doc.SetMode(c4d.Mpolygons)
+        tw, _tag = core.recapture_selection(doc, tw)
+        check("SelectionLimit: 選択を取り直してもオフのまま", core.selection_limit(tw) is False)
+
+        # フリーズ: オフのままの変形（先の部分も）が焼き込まれ、タグも消える
+        expected = deformed_points(doc, pipe)
+        doc.SetActiveObject(pipe, c4d.SELECTION_NEW)
+        ui.do_freeze(doc)
+        pipe = doc.SearchObject("LimitPipe")
+        check("SelectionLimit: フリーズでオフの変形が焼き込まれる", max_diff(pipe.GetAllPoints(), expected) < 1e-3,
+              "%.5f" % max_diff(pipe.GetAllPoints(), expected))
+        check("SelectionLimit: フリーズでタグも消える", not core.sd_deformers_under(pipe)
+              and not any(t.GetName().startswith(core.SELTAG_BASENAME) for t in pipe.GetTags()))
+
+        # 既定値オフで作ると、パネルのチェックはオフを表示する（作成時の扱い）
+        doc.SetActiveObject(pipe, c4d.SELECTION_NEW)
+        select_polys(pipe, lambda c: c.y > 150)
+        made = ui.do_type(doc, c4d.Oshear)
+        check("SelectionLimit: 既定値オフのとき作成もオフ", made is not None and core.selection_limit(made) is False)
+
+        # ベベル: 名前で限定するので切り替えはない
+        bevel = core.switch_type(doc, made, c4d.Obevel)
+        check("SelectionLimit: ベベルは対象外", core.selection_limit(bevel) is None)
+        try:
+            core.set_selection_limit(doc, bevel, False)
+            check("SelectionLimit: ベベルの切り替えはエラー", False)
+        except core.SDError:
+            check("SelectionLimit: ベベルの切り替えはエラー", True)
+        back = core.switch_type(doc, bevel, c4d.Obend, limit=False)
+        check("SelectionLimit: ベベルから箱の種類へは limit に従う", core.selection_limit(back) is False)
+    finally:
+        ui.set_limit_default(saved_default)
+    check("SelectionLimit: 既定値を元に戻せる", ui.limit_default() == saved_default)
+
+
 def test_panel_rows(doc):
     """パネルの数値欄: 屈曲・ツイストは1段目（量）が角度、屈曲・シアーは2段目（方向）に角度。
     シアーは向きを変えても先端のずれ量を保つ。どれもアンドゥ1回で戻る。"""
@@ -747,6 +864,7 @@ def _run_all(doc):
     test_tilted_square_patch(doc)
     test_recapture(doc)
     test_add_stacked(doc)
+    test_selection_limit(doc)
     test_bevel(doc)
     test_panel_rows(doc)
     test_pick_hit(doc)

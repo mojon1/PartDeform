@@ -31,6 +31,7 @@ G_SHIFT = 1401  # 1段目（量）: シアー・テーパー・膨張・ベベ�
 G_DIR_LABEL = 1402  # 2段目（方向）の名前
 G_DIR = 1403  # 2段目（方向）: 屈曲・シアーの角度（曲げ・ずらす向き）
 G_DEFORMEDIT = 1500
+G_LIMIT = 1501  # 「選択範囲に限定」のチェック
 G_RECAPTURE = 1307
 LABEL_OFFSET = 5000  # アイコンの下の名前のガジェットID＝ボタンのID＋これ
 
@@ -70,6 +71,21 @@ ORIENT_BUTTONS = (
 
 # 起点クリックツールを抜けたあとに戻すツール
 _previous_tool = None
+
+# パネルの設定（C4D を終了しても残る。キーは本体のID）
+PREF_LIMIT = 1  # 新しく作るデフォーマーを選択範囲に限定するか（既定はオン）
+
+
+def limit_default():
+    """これから作るデフォーマーを選択範囲に限定するか（パネルの「選択範囲に限定」の既定値）。"""
+    bc = plugins.GetWorldPluginData(core.ID_PANEL)
+    return bc.GetBool(PREF_LIMIT, True) if bc is not None else True
+
+
+def set_limit_default(on):
+    bc = plugins.GetWorldPluginData(core.ID_PANEL) or c4d.BaseContainer()
+    bc.SetBool(PREF_LIMIT, bool(on))
+    plugins.SetWorldPluginData(core.ID_PANEL, bc)
 
 
 def _icon(resource_id):
@@ -123,12 +139,16 @@ def do_type(doc, dtype, add=False):
     def work():
         previous = core.active_sd_deformer(doc)
         previous_name = previous.GetName() if previous is not None else ""
-        d, how = core.create_or_switch(doc, dtype, add=add)
+        limit = limit_default()
+        d, how = core.create_or_switch(doc, dtype, add=add, limit=limit)
         if how == "add":
             report(tr("%s を追加しました（%s と同じ選択範囲・向きで重ねました）。", "Added %s (stacked on %s with the same selection and direction).") % (d.GetName(), previous_name))
         elif how == "create" and core.is_bevel(d):
             # ベベルは選択範囲タグの名前で限定するので、タグを持たない子オブジェクトには効かない
             report(tr("%s を作成しました。オフセットはパネルの量の欄か属性マネージャーで調整できます。", "Created %s. Adjust the offset in the panel or in the Attribute Manager.") % d.GetName())
+        elif how == "create" and not limit:
+            report(tr("%s を作成しました（選択範囲に限定: オフ。選択していない部分も、標準のデフォーマーと同じように変形します）。",
+                      "Created %s (Limit to Selection: off. Unselected parts deform too, as with a standard deformer).") % d.GetName())
         elif how == "create":
             message = tr("%s を作成しました。向きが違うときは「起点と方向」のボタン（「起点」でクリック指定）で直せます。", "Created %s. If the direction is wrong, fix it with the Anchor & Direction buttons (Anchor lets you click the side).") % d.GetName()
             children = core.affected_children(d.GetUp())
@@ -181,6 +201,35 @@ def do_freeze(doc):
         meshes = core.freeze(doc, targets)
         report(tr("%d 個のデフォーマーをフリーズしました（%s）。", "Froze %d deformer(s) (%s).") % (len(targets), tr("、", ", ").join(m.GetName() for m in meshes)))
         return meshes
+
+    return _run(doc, None, work)
+
+
+def do_limit(doc, on):
+    """「選択範囲に限定」のチェック。選択中の PartDeform のデフォーマーを切り替え（アンドゥ1回）、
+    これから作るデフォーマーの既定値にもする（デフォーマーを選んでいなければ既定値だけ）。"""
+    leave_pick_mode(doc)
+    set_limit_default(on)
+
+    def work():
+        target = _target_or_none(doc)
+        if target is None or core.is_bevel(target):
+            if on:
+                report(tr("これから作るデフォーマーは、選択範囲に限定します。", "New deformers will be limited to the selection."))
+            else:
+                report(tr("これから作るデフォーマーは、選択範囲に限定しません（フィールドのレイヤーは「有効」オフで入ります）。",
+                          "New deformers will not be limited to the selection (the Fields layer is added but disabled)."))
+            return None
+        core.set_selection_limit(doc, target, on)
+        if on:
+            report(tr("%s を選択範囲に限定しました（選択した部分だけが変形します）。",
+                      "Limited %s to the selection (only the selected part deforms).") % target.GetName())
+        else:
+            report(tr("%s の「選択範囲に限定」をオフにしました。選択していない部分も、標準のデフォーマーと同じように変形します"
+                      "（パイプの一部を曲げて、先の部分も付いてこさせるときなど）。",
+                      "Turned off Limit to Selection for %s. Unselected parts deform too, as with a standard deformer "
+                      "(for example, to bend part of a pipe and let the rest follow).") % target.GetName())
+        return target
 
     return _run(doc, None, work)
 
@@ -352,6 +401,9 @@ class PartDeformPanel(gui.GeDialog):
         for i, dtype in enumerate(core.DEFORMER_TYPES):
             self._add_type_button(G_TYPE_BASE + i, dtype)
         self.GroupEnd()
+        # 選択範囲に限定（フィールドの変数タグレイヤーの「有効」）。選択中のデフォーマーの状態を表示・切り替えし、
+        # これから作るデフォーマーの既定値にもなる。オフはパイプの一部を曲げて先も付いてこさせるときなど
+        self.AddCheckbox(G_LIMIT, c4d.BFH_LEFT, 0, 0, name=tr("選択範囲に限定", "Limit to Selection"))
 
         # 1段目＝量: シアー・テーパー・膨張の強度（%）は実際に動く量（長さ）、ベベルはオフセット、
         # 屈曲は強度（曲げる角度）、ツイストは角度（ひねる角度）。属性マネージャーと同じ「数値欄＋スライダー」
@@ -507,8 +559,24 @@ class PartDeformPanel(gui.GeDialog):
         no_box = core.is_bevel(_target_or_none(doc)) if doc is not None else False
         for gid in (G_CYCLE, G_FLIP, G_ROT90, G_PICK, G_AUTO, G_REFIT):
             self._enable_icon_button(gid, not no_box)
+        self.update_limit(doc)
         self._sync_pick_toggle()
         self.update_rows(doc)
+
+    def update_limit(self, doc):
+        """「選択範囲に限定」: PartDeform のデフォーマーを選んでいればその状態、いなければ作成時の既定値を表示する。
+        ベベルは名前で限定するので常にオン（切り替えられない）。"""
+        target = _target_or_none(doc) if doc is not None else None
+        state = core.selection_limit(target) if target is not None else None
+        if core.is_bevel(target):
+            value, enabled = True, False
+        elif state is None:
+            value, enabled = limit_default(), True
+        else:
+            value, enabled = state, True
+        self.Enable(G_LIMIT, enabled)
+        if self.GetBool(G_LIMIT) != value:
+            self.SetBool(G_LIMIT, value)
 
     def update_rows(self, doc):
         """数値欄（量・方向）を、選んでいるデフォーマーの種類に合わせて名前と単位を切り替えて表示する。"""
@@ -612,6 +680,8 @@ class PartDeformPanel(gui.GeDialog):
             do_freeze(doc)
         elif cid == G_RECAPTURE:
             do_recapture(doc)
+        elif cid == G_LIMIT:
+            do_limit(doc, self.GetBool(G_LIMIT))
         elif cid == G_DEFORMEDIT:
             set_deformed_edit(doc, self.GetBool(G_DEFORMEDIT))
         elif cid in (G_SHIFT, G_DIR):

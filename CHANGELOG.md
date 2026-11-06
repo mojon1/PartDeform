@@ -1,5 +1,12 @@
 # Changelog / 変更履歴
 
+## Unreleased
+
+- **Limit to Selection** option in the panel. Turn it off to make the deformer act like a standard one
+  (for example, bend the middle of a pipe and let the rest follow). The Fields layer stays but is disabled, so you can switch back at any time.
+  パネルに「選択範囲に限定」を追加。オフにすると標準のデフォーマーと同じ動きになる（パイプの途中を曲げて、先の部分も付いてこさせるなど）。
+  フィールドのレイヤーは「有効」オフで残るので、いつでも戻せる。
+
 ## 1.0.0 (2026-11-06)
 
 First public release. / 最初の公開版。
