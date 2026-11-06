@@ -8,6 +8,10 @@
 
 **[⬇ Download PartDeform 1.0.0 (zip)](https://github.com/mojon1/PartDeform/releases/download/v1.0.0/PartDeform-v1.0.0-plugin.zip)** — free. Unzip it and put the `PartDeform` folder into your Cinema 4D `plugins` folder ([Installation](#installation)).
 
+<a href="https://youtu.be/VMyHsNeK2TE"><img src="docs/images/demo_thumbnail.jpg" width="560" alt="Watch PartDeform in use on YouTube"></a>
+
+▶ [Watch PartDeform in use on YouTube (50 s)](https://youtu.be/VMyHsNeK2TE)
+
 Select polygons, points or edges and click Bend, Shear, Taper, Twist, Bulge or Bevel.
 The deformer box is **sized, positioned and oriented to exactly that selection** (following the edge flow),
 and only the selected part is deformed. The side connected to the rest of the mesh becomes the anchor automatically.

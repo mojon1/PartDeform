@@ -8,6 +8,10 @@
 
 **[⬇ PartDeform 1.0.0 をダウンロード（zip）](https://github.com/mojon1/PartDeform/releases/download/v1.0.0/PartDeform-v1.0.0-plugin.zip)** — 無料。展開して、`PartDeform` フォルダを C4D の `plugins` フォルダに入れてください（[インストール](#インストール)）。
 
+<a href="https://youtu.be/VMyHsNeK2TE"><img src="docs/images/demo_thumbnail.jpg" width="560" alt="PartDeform を使っている様子（YouTube）"></a>
+
+▶ [使っている様子の動画を YouTube で見る（50秒）](https://youtu.be/VMyHsNeK2TE)
+
 ポリゴン・ポイント・エッジを選んで、屈曲・シアー・テーパー・ツイスト・膨張・ベベルのボタンを押すだけ。
 デフォーマーの箱が**選択範囲にぴったりの大きさ・位置・向き**（エッジの流れに沿う）で置かれ、選んだ部分だけが変形します。
 本体とつながっている側が自動で起点（効果が 0 になる側）になります。
