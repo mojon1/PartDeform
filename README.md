@@ -21,8 +21,12 @@ PartDeform brings the "deform just this part" workflow — like Modo falloffs or
 to **Cinema 4D polygon modeling**. Adjust in real units (mm and degrees), switch or stack deformers,
 and **Freeze** the result into the mesh when you are done.
 
+**A helper, not a dependency.** PartDeform only builds a standard Cinema 4D setup — a deformer, a selection tag and Fields,
+exactly what you could build by hand. Everything that actually deforms your mesh is a native Cinema 4D feature,
+so your scenes open and render the same on any machine or render farm without the plugin,
+and after **Freeze** nothing PartDeform made is left in the scene.
+
 - Free and open source ([MIT License](LICENSE)): anyone can copy, share and modify it.
-- It only creates standard deformers and selection tags, so scenes open with the same shape on machines or render farms without the plugin.
 - English and Japanese UI (Japanese when Cinema 4D runs in Japanese, English otherwise).
 
 > Latest release: [1.0.0](https://github.com/mojon1/PartDeform/releases/latest) ([changelog](CHANGELOG.md))
@@ -105,6 +109,9 @@ Bevel works differently from the other five (it cuts corners and adds faces, so 
 
 ## How it works
 
+- PartDeform creates only standard objects: the deformer, the selection tag and a Fields layer. To recognize its own deformers later
+  (switching the type, Update Selection, Freeze), it stores a small ID in their data; Cinema 4D simply ignores it when the plugin
+  is not installed, and it disappears together with the deformer and the tag when you Freeze.
 - The effect is limited with a Variable Tag layer in the deformer's **Fields**, pointing to the selection tag (`PD_Sel`, `PD_Sel.1`, ...).
   This is the same as dragging the selection tag into the Fields yourself, so you can add falloff fields on top.
 - The bottom of the box (local -Y) has no effect and the top has the full effect (Bulge: both ends have no effect). The bottom is placed at the anchor of the selection.
