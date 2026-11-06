@@ -6,7 +6,7 @@
 
 ![PartDeform: 屈曲した円柱とツイストした角柱、PartDeform のパネル](docs/images/overview_ja.png)
 
-**[⬇ PartDeform 1.0.0 をダウンロード（zip）](https://github.com/mojon1/PartDeform/releases/download/v1.0.0/PartDeform-v1.0.0-plugin.zip)** — 無料。[Gumroad](https://mojon.gumroad.com/l/partdeform) でも配布しています（お好きな金額で応援できます）。展開して、`PartDeform` フォルダを C4D の `plugins` フォルダに入れてください（[インストール](#インストール)）。
+**[⬇ PartDeform 1.1.0 をダウンロード（zip）](https://github.com/mojon1/PartDeform/releases/download/v1.1.0/PartDeform-v1.1.0-plugin.zip)** — 無料。[Gumroad](https://mojon.gumroad.com/l/partdeform) でも配布しています（お好きな金額で応援できます）。展開して、`PartDeform` フォルダを C4D の `plugins` フォルダに入れてください（[インストール](#インストール)）。
 
 <a href="https://youtu.be/VMyHsNeK2TE"><img src="docs/images/demo_thumbnail.jpg" width="560" alt="PartDeform を使っている様子（YouTube）"></a>
 
@@ -28,7 +28,7 @@ Modo のフォールオフや 3ds Max のサブオブジェクト＋モディフ
 - 無料・オープンソース（[MIT ライセンス](LICENSE)）。誰でもコピー・配布・改変できます。
 - 表示は日本語と英語に対応しています（C4D の表示言語が日本語なら日本語、それ以外は英語）。
 
-> 最新版: [1.0.0](https://github.com/mojon1/PartDeform/releases/latest)（[変更履歴](CHANGELOG.md)）
+> 最新版: [1.1.0](https://github.com/mojon1/PartDeform/releases/latest)（[変更履歴](CHANGELOG.md)）
 
 ## 動作環境
 
@@ -36,7 +36,7 @@ Modo のフォールオフや 3ds Max のサブオブジェクト＋モディフ
 
 ## インストール
 
-1. [Releases](https://github.com/mojon1/PartDeform/releases/latest) から `PartDeform-v1.0.0-plugin.zip` をダウンロードして展開します
+1. [Releases](https://github.com/mojon1/PartDeform/releases/latest) から `PartDeform-v1.1.0-plugin.zip` をダウンロードして展開します
    （GitHub が自動で付ける「Source code」ではありません）。
 2. `PartDeform` フォルダ（`PartDeform.pyp`・`partdeform`・`res` が入っているフォルダ）を丸ごと、C4D のプラグインフォルダに置きます。
    プラグインフォルダは、設定ウィンドウ（**編集 ＞ 設定**。macOS では **Cinema 4D** メニューにある場合があります）の左下のボタンで開ける設定フォルダの中の `plugins` です。

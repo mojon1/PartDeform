@@ -1,6 +1,6 @@
 # Changelog / 変更履歴
 
-## Unreleased
+## 1.1.0 (2026-11-06)
 
 - **Limit to Selection** option in the panel. Turn it off to make the deformer act like a standard one
   (for example, bend the middle of a pipe and let the rest follow). The Fields layer stays but is disabled, so you can switch back at any time.

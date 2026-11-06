@@ -6,7 +6,7 @@
 
 ![PartDeform: a bent pipe and a twisted column, with the PartDeform panel](docs/images/overview_en.png)
 
-**[⬇ Download PartDeform 1.0.0 (zip)](https://github.com/mojon1/PartDeform/releases/download/v1.0.0/PartDeform-v1.0.0-plugin.zip)** — free. Also on [Gumroad](https://mojon.gumroad.com/l/partdeform) (pay what you want). Unzip it and put the `PartDeform` folder into your Cinema 4D `plugins` folder ([Installation](#installation)).
+**[⬇ Download PartDeform 1.1.0 (zip)](https://github.com/mojon1/PartDeform/releases/download/v1.1.0/PartDeform-v1.1.0-plugin.zip)** — free. Also on [Gumroad](https://mojon.gumroad.com/l/partdeform) (pay what you want). Unzip it and put the `PartDeform` folder into your Cinema 4D `plugins` folder ([Installation](#installation)).
 
 <a href="https://youtu.be/VMyHsNeK2TE"><img src="docs/images/demo_thumbnail.jpg" width="560" alt="Watch PartDeform in use on YouTube"></a>
 
@@ -28,7 +28,7 @@ so your scenes open and render the same on any machine or render farm, with or w
 - Free and open source ([MIT License](LICENSE)): anyone can copy, share and modify it.
 - English and Japanese UI (Japanese when Cinema 4D runs in Japanese, English otherwise).
 
-> Latest release: [1.0.0](https://github.com/mojon1/PartDeform/releases/latest) ([changelog](CHANGELOG.md))
+> Latest release: [1.1.0](https://github.com/mojon1/PartDeform/releases/latest) ([changelog](CHANGELOG.md))
 
 ## Requirements
 
@@ -36,7 +36,7 @@ so your scenes open and render the same on any machine or render farm, with or w
 
 ## Installation
 
-1. Download `PartDeform-v1.0.0-plugin.zip` from [Releases](https://github.com/mojon1/PartDeform/releases/latest) and unzip it
+1. Download `PartDeform-v1.1.0-plugin.zip` from [Releases](https://github.com/mojon1/PartDeform/releases/latest) and unzip it
    (not "Source code", which GitHub adds automatically).
 2. Put the `PartDeform` folder (the one that contains `PartDeform.pyp`, `partdeform` and `res`) into your Cinema 4D `plugins` folder.
    The `plugins` folder is inside the preferences folder, which you can open with the button at the bottom left of the Preferences window
