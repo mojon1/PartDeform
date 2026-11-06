@@ -2,10 +2,20 @@
 
 [日本語](README_ja.md)
 
-Select polygons, points or edges and place a standard Cinema 4D deformer
-(Bend, Shear, Taper, Twist, Bulge, Bevel) **sized and oriented to the selection** in one click.
-Only the selected part is deformed, and the anchor (the side with no effect) is placed on the unselected side automatically.
-Keep the result as a deformer + selection tag, or **Freeze** it into the mesh.
+**Deformers that fit your selection — automatically.**
+
+![PartDeform: a bent pipe and a twisted column, with the PartDeform panel](docs/images/overview_en.png)
+
+**[⬇ Download PartDeform 1.0.0 (zip)](https://github.com/mojon1/PartDeform/releases/download/v1.0.0/PartDeform-v1.0.0-plugin.zip)** — free. Unzip it and put the `PartDeform` folder into your Cinema 4D `plugins` folder ([Installation](#installation)).
+
+Select polygons, points or edges and click Bend, Shear, Taper, Twist, Bulge or Bevel.
+The deformer box is **sized, positioned and oriented to exactly that selection** (following the edge flow),
+and only the selected part is deformed. The side connected to the rest of the mesh becomes the anchor automatically.
+No more *Fit to Parent* that fits the whole object, rotating the box by hand, or dragging selection tags into Fields.
+
+PartDeform brings the "deform just this part" workflow — like Modo falloffs or 3ds Max sub-object modifiers —
+to **Cinema 4D polygon modeling**. Adjust in real units (mm and degrees), switch or stack deformers,
+and **Freeze** the result into the mesh when you are done.
 
 - Free and open source ([MIT License](LICENSE)): anyone can copy, share and modify it.
 - It only creates standard deformers and selection tags, so scenes open with the same shape on machines or render farms without the plugin.
@@ -47,6 +57,10 @@ You can assign the commands to shortcuts or palettes in the Command Manager.
 - With a PartDeform deformer selected, a type button **switches the type** and keeps the box and the direction.
 - **Shift+click** a type button to **stack** a new deformer on the same selection and direction (for example Taper + Twist).
   While you hold Shift over the panel, a green + appears on the icons.
+![Anchor mode: green = current anchor, orange = the side you are about to set](docs/images/anchor_en.png)
+
+*Anchor mode: the green band is the current anchor, the orange band is the side you would set by clicking.*
+
 - To change the affected area later, reselect on the mesh, click the deformer in the Object Manager, and press **Update Selection**.
 
 ## Panel
